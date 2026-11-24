@@ -1,5 +1,7 @@
 export type FeedSourceStatus = 'live' | 'replay' | 'error'
 
+export type CandleSource = 'live' | 'synthetic' | 'unavailable'
+
 export type HudChannel = 'all' | 'hyperliquid' | 'polymarket' | 'telegram'
 
 export interface OhlcCandle {
@@ -26,6 +28,7 @@ export interface HyperliquidPerpSignal {
   bestAsk: number | null
   spreadBps: number | null
   candles15m: OhlcCandle[]
+  candlesSource: CandleSource
   alertTag: string
   updatedAt: number
 }
@@ -47,6 +50,7 @@ export interface PolymarketOddsSignal {
   change24hCents: number
   volume24hUsd: number
   sparkline24h: number[]
+  sparklineSource?: 'live' | 'synthetic'
   alertTag: string
   updatedAt: number
 }

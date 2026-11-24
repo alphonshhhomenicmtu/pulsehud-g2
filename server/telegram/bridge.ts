@@ -70,7 +70,7 @@ export function generateSmartDrafts(
     return [
       `Watching ${linkedSig.coin} @ ${px} (${fund}) — hedging 25%.`,
       `Taking 50% off ${linkedSig.coin} and moving stop to BE.`,
-      `Got ${linkedSig.coin} locked on G2 HUD, acting shortly.`,
+      `Watching ${linkedSig.coin} closely; will size in shortly.`,
     ]
   }
 
@@ -108,7 +108,7 @@ export function generateSmartDrafts(
   }
 
   return [
-    `Saw this on G2 — acting in 1 minute.`,
+    `Got it — checking levels and acting in a minute.`,
     `Copy that. Keeping risk tight at current levels.`,
     `Will check full book once back at my desk.`,
   ]

@@ -1,20 +1,20 @@
 {
-  "verifiedAt": "2026-11-24T09:23:23.415Z",
-  "version": "2.0.0",
+  "verifiedAt": "2026-11-24T12:46:22.891Z",
+  "version": "2.1.0",
   "simulatorVersion": "0.9.5",
   "sdkVersion": "0.0.16",
   "bridgeMode": "even-g2",
   "health": {
     "hyperliquid": {
       "status": "live",
-      "latencyMs": 2114,
-      "lastSyncAt": 1795512198409,
+      "latencyMs": 3151,
+      "lastSyncAt": 1795524367643,
       "candlesLoaded": true
     },
     "polymarket": {
       "status": "live",
-      "latencyMs": 3161,
-      "lastSyncAt": 1795512198409,
+      "latencyMs": 5497,
+      "lastSyncAt": 1795524367643,
       "clobVerified": true
     },
     "telegram": {
@@ -22,7 +22,7 @@
       "botUsername": null,
       "chatIdConfigured": false,
       "unreadCount": 3,
-      "lastSyncAt": 1795512203412
+      "lastSyncAt": 1795524382882
     },
     "stt": {
       "provider": "local_command"
@@ -31,9 +31,9 @@
   "hyperliquidCount": 5,
   "hyperliquidTop": {
     "coin": "BTC",
-    "markPx": 59859.7,
-    "change24hPct": -2.93,
-    "fundingAprPct": -7.1,
+    "markPx": 60442,
+    "change24hPct": -1.27,
+    "fundingAprPct": -1.2,
     "spreadBps": 0.17,
     "candles15mCount": 24
   },
@@ -41,8 +41,8 @@
   "watchedWallet": {
     "address": "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
     "status": "live",
-    "accountValueUsd": 32395225.15,
-    "marginRatioPct": 29.33,
+    "accountValueUsd": 32514564.07,
+    "marginRatioPct": 29.54,
     "positionsCount": 12
   },
   "voiceIntentTest": {
@@ -56,20 +56,20 @@
   },
   "executedReceipts": [
     {
-      "id": "rcpt-1795512196596",
-      "timestamp": 1795512196596,
+      "id": "rcpt-1795524374416",
+      "timestamp": 1795524374416,
       "type": "hl_paper_short",
       "title": "PAPER SHORT BTC",
-      "detail": "0.01671 BTC @ $59,845 ($1000 notional)",
+      "detail": "0.01655 BTC @ $60,415 ($1000 notional)",
       "venue": "hyperliquid-paper",
       "deliveredExternal": false
     },
     {
-      "id": "rcpt-1795512190456",
-      "timestamp": 1795512190456,
+      "id": "rcpt-1795524368180",
+      "timestamp": 1795524368180,
       "type": "tg_reply",
       "title": "TG REPLY SENT",
-      "detail": "Telegram Desk Bridge: \"Copy — hedging 25% BTC @ $59,827 (-7.4% APR).\"",
+      "detail": "Telegram Desk Bridge: \"Copy — hedging 25% BTC @ $60,546 (-1.2% APR).\"",
       "venue": "telegram",
       "deliveredExternal": false
     }
@@ -80,30 +80,30 @@
       "venue": "hyperliquid",
       "symbol": "BTC-PERP",
       "side": "LONG",
-      "size": 0.02541,
-      "entryPrice": 59348.38,
-      "markPrice": 59859.7,
-      "notionalUsd": 1521.03,
-      "unrealizedPnlUsd": 12.99,
-      "unrealizedPnlPct": 0.86,
+      "size": 0.02507,
+      "entryPrice": 60061.63,
+      "markPrice": 60442,
+      "notionalUsd": 1515.28,
+      "unrealizedPnlUsd": 9.54,
+      "unrealizedPnlPct": 0.63,
       "stopLossPx": null,
       "stopLossMode": null,
-      "openedAt": 1795509655230
+      "openedAt": 1795521832124
     },
     {
-      "id": "pos-pm-7121526",
+      "id": "pos-pm-3215008",
       "venue": "polymarket",
-      "symbol": "ETH be above $1,700 on November 24?",
+      "symbol": "Fed increase rates by 25 bps at Dec FOMC?",
       "side": "YES",
-      "size": 424.78,
-      "entryPrice": 0.2825,
-      "markPrice": 0.3325,
-      "notionalUsd": 141.24,
-      "unrealizedPnlUsd": 21.24,
-      "unrealizedPnlPct": 17.7,
+      "size": 134.08,
+      "entryPrice": 0.895,
+      "markPrice": 0.935,
+      "notionalUsd": 125.36,
+      "unrealizedPnlUsd": 5.36,
+      "unrealizedPnlPct": 4.47,
       "stopLossPx": null,
       "stopLossMode": null,
-      "openedAt": 1795510675230
+      "openedAt": 1795522852124
     }
   ],
   "lvglMissingGlyphCount": 0,

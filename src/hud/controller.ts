@@ -21,6 +21,7 @@ import {
   toRebuildPageContainer,
   toStartUpPageContainer,
   type BuiltHudPage,
+  type ConfirmPhase,
   type HudLayoutKey,
   type HudRenderModel,
   type HudScreenKind,
@@ -53,8 +54,10 @@ export class PulseHudController {
   private stagedAction: StagedAction | null = null
   private confirmSelection: 'confirm' | 'cancel' = 'confirm'
 
-  // 2.0-second Post-Tap Undo Safety Window state
+  // 2.0-second Post-Tap Undo Safety Window state machine (idle -> armed -> committing -> done)
   private readonly undoWindowMs: number
+  private confirmPhase: ConfirmPhase = 'idle'
+  private confirmCommitId = 0
   private confirmArmedUntil: number | null = null
   private confirmTickTimer: ReturnType<typeof setInterval> | null = null
   private confirmCommitTimer: ReturnType<typeof setTimeout> | null = null
@@ -99,6 +102,8 @@ export class PulseHudController {
   public destroy(): void {
     this.unsubscribeBridge?.()
     this.unsubscribeBridge = null
+    this.confirmCommitId += 1
+    this.confirmPhase = 'done'
     this.clearUndoTimers()
     if (this.voiceTimer !== null) {
       clearInterval(this.voiceTimer)
@@ -173,10 +178,12 @@ export class PulseHudController {
   }
 
   public getRenderModel(): HudRenderModel {
-    const armed = this.confirmArmedUntil !== null
+    const armed = this.confirmPhase === 'armed' && this.confirmArmedUntil !== null
     const remainingMs = armed
       ? Math.max(0, this.confirmArmedUntil! - Date.now())
-      : this.undoWindowMs
+      : this.confirmPhase === 'committing'
+        ? 0
+        : this.undoWindowMs
 
     return {
       screen: this.screen,
@@ -191,6 +198,7 @@ export class PulseHudController {
       actionIndex: this.actionIndex,
       stagedAction: this.stagedAction,
       confirmSelection: this.confirmSelection,
+      confirmPhase: this.confirmPhase,
       confirmArmed: armed,
       confirmRemainingMs: remainingMs,
       confirmTotalMs: this.undoWindowMs,
@@ -238,13 +246,24 @@ export class PulseHudController {
       return
     }
 
+    // Lock tap, double-tap, scroll, long-press, and menu while an action is committing
+    if (this.confirmPhase === 'committing') {
+      return
+    }
+
     if (gesture.kind === 'menu_item') {
       await this.handleMenuSelection(gesture.itemID)
       return
     }
 
     if (gesture.kind === 'long_press') {
-      this.clearUndoTimers()
+      if (this.confirmPhase === 'armed') {
+        this.clearUndoTimers()
+        this.confirmPhase = 'done'
+        this.stagedAction = null
+      } else {
+        this.clearUndoTimers()
+      }
       await this.beginVoiceCapture()
       return
     }
@@ -354,18 +373,21 @@ export class PulseHudController {
       }
     }
 
-    // Confirm Gate + 2.0-Second Post-Tap Undo Safety Window
+    // Confirm Gate + 2.0-Second Post-Tap Undo Safety Window ('committing' already locked above)
     if (this.screen === 'confirm') {
       // During the 2.0s Armed Countdown Window: ANY single tap OR double-tap cancels cleanly!
-      if (this.confirmArmedUntil !== null) {
+      if (this.confirmPhase === 'armed') {
         if (gesture.kind === 'click' || gesture.kind === 'double_click') {
           this.cancelArmedUndo()
-          return
         }
+        return
+      }
+      if (this.confirmPhase !== 'idle') {
         return
       }
 
       if (gesture.kind === 'double_click') {
+        this.confirmPhase = 'done'
         this.stagedAction = null
         this.screen = 'feed'
         this.showToast('Action cancelled')
@@ -378,12 +400,13 @@ export class PulseHudController {
       }
       if (gesture.kind === 'click') {
         if (this.confirmSelection === 'cancel' || !this.stagedAction) {
+          this.confirmPhase = 'done'
           this.stagedAction = null
           this.screen = 'feed'
           this.showToast('Action cancelled')
           return
         }
-        // Arm the 2.0-second Undo Safety Window instead of firing blindly!
+        // Arm the 2.0-second Undo Safety Window strictly from 'idle'
         this.armUndoCountdown()
         return
       }
@@ -480,7 +503,16 @@ export class PulseHudController {
   }
 
   public async handleMenuSelection(itemID: number): Promise<void> {
-    this.clearUndoTimers()
+    if (this.confirmPhase === 'committing') {
+      return
+    }
+    if (this.confirmPhase === 'armed') {
+      this.clearUndoTimers()
+      this.confirmPhase = 'done'
+      this.stagedAction = null
+    } else {
+      this.clearUndoTimers()
+    }
     if (this.voiceCapture.isActive()) {
       await this.cancelVoiceCapture()
     }
@@ -542,6 +574,9 @@ export class PulseHudController {
   }
 
   public async submitTranscriptFromCompanion(transcript: string): Promise<string> {
+    if (this.confirmPhase === 'committing') {
+      return 'A write action is currently committing — wait for the receipt.'
+    }
     const active = this.getActiveSignal()
     const response = await sendVoiceCommand({
       transcript,
@@ -557,7 +592,9 @@ export class PulseHudController {
   }
 
   private openConfirmGate(action: StagedAction): void {
+    if (this.confirmPhase === 'committing') return
     this.clearUndoTimers()
+    this.confirmPhase = 'idle'
     this.stagedAction = action
     this.confirmSelection = 'confirm'
     this.screen = 'confirm'
@@ -576,24 +613,30 @@ export class PulseHudController {
   }
 
   private armUndoCountdown(): void {
+    // Re-arm strictly from 'idle' only
+    if (this.confirmPhase !== 'idle' || !this.stagedAction) return
     this.clearUndoTimers()
+    this.confirmPhase = 'armed'
     this.confirmArmedUntil = Date.now() + this.undoWindowMs
     void this.syncDisplay(false)
 
-    // Smooth visual countdown updates for both text progress bar AND 4-bit ring graphic
+    // 4Hz visual countdown updates for both text progress bar AND 4-bit ring graphic
     this.confirmTickTimer = setInterval(() => {
-      if (this.confirmArmedUntil === null) return
+      if (this.confirmPhase !== 'armed' || this.confirmArmedUntil === null) return
       void this.syncDisplay(false)
-    }, 180)
+    }, 250)
 
     this.confirmCommitTimer = setTimeout(() => {
       this.clearUndoTimers()
+      if (this.confirmPhase !== 'armed') return
       void this.commitStagedAction()
     }, this.undoWindowMs)
   }
 
   private cancelArmedUndo(): void {
+    if (this.confirmPhase !== 'armed') return
     this.clearUndoTimers()
+    this.confirmPhase = 'done'
     const label = this.stagedAction?.headline ?? 'Action'
     this.stagedAction = null
     this.screen = 'feed'
@@ -601,16 +644,33 @@ export class PulseHudController {
   }
 
   private async commitStagedAction(): Promise<void> {
+    if (this.confirmPhase !== 'armed') return
     const action = this.stagedAction
-    if (!action) return
+    if (!action) {
+      this.confirmPhase = 'done'
+      return
+    }
+    // Enter 'committing' synchronously before any await so a tap at 0.0s can never re-arm or double-send
+    this.confirmPhase = 'committing'
+    const commitId = ++this.confirmCommitId
+    void this.syncDisplay(false)
+
     try {
       const result = await this.executeActionFn(action)
+      if (this.confirmCommitId !== commitId || this.confirmPhase !== 'committing') {
+        return
+      }
+      this.confirmPhase = 'done'
       this.state = result.state
       this.stagedAction = null
       this.screen = 'feed'
       this.showToast(result.toast)
     } catch (err) {
+      if (this.confirmCommitId !== commitId || this.confirmPhase !== 'committing') {
+        return
+      }
       const msg = err instanceof Error ? err.message : 'Execution error'
+      this.confirmPhase = 'done'
       this.stagedAction = null
       this.screen = 'feed'
       this.showToast(`ERR: ${msg}`)
@@ -870,7 +930,7 @@ export class PulseHudController {
         tgActions.push({
           id: `act-coinlock-hedge-${now}`,
           type: 'hl_paper_short',
-          label: `[COIN-LOCK] 1-Tap Paper Short $${sizeUsd.toLocaleString('en-US')} ${coin}`,
+          label: `[COIN-LOCK] Stage Paper Short $${sizeUsd.toLocaleString('en-US')} ${coin}`,
           headline: `TG->TRADE PAPER SHORT ${coin}`,
           summary: `Coin-locked from ${signal.sender}: $${sizeUsd.toLocaleString('en-US')} ${coin} @ $${px.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
           riskNote: 'PAPER MODE ONLY · Coin-locked TG->Trade · 2.0s undo window.',

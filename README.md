@@ -1,39 +1,56 @@
-# PulseHUD v2.0 — Glanceable DeFi & Telegram Trading Copilot for Even G2
+# PulseHUD v2.1 — Glanceable DeFi & Telegram HUD for Even Realities G2
 
 [![Live 576x288 Web G2 Simulator](https://img.shields.io/badge/Live_Browser_G2_Simulator-576x288_Interactive-45ff98?style=for-the-badge&logo=github)](https://alphonshhhomenicmtu.github.io/pulsehud-g2/)
 
-**Try PulseHUD instantly in your browser (zero install):** **[https://alphonshhhomenicmtu.github.io/pulsehud-g2/](https://alphonshhhomenicmtu.github.io/pulsehud-g2/)** — interactive 576×288 monochrome green Even G2 waveguide preview hitting live public Hyperliquid & Polymarket APIs directly, with clickable R1 ring / temple controls, keyboard shortcuts (`↑/↓` Scroll, `Enter` Tap, `Esc` Undo/Back, `M` OS Context Menu), live `clearinghouseState` wallet watcher, Coin-Locked TG->Trade, and the 2.0-second Undo Countdown Ring.
+**Try PulseHUD in your browser (no install, no glasses required):** **[https://alphonshhhomenicmtu.github.io/pulsehud-g2/](https://alphonshhhomenicmtu.github.io/pulsehud-g2/)** — interactive 576×288 4-bit monochrome green Even G2 preview hitting live public Hyperliquid and Polymarket APIs directly, with clickable R1 ring / temple controls, keyboard shortcuts (`↑/↓` Scroll, `Enter` Tap, `Esc` Undo/Back, `M` OS Context Menu), nearest-liquidation `clearinghouseState` watcher, Coin-Locked Telegram-to-Trade, and the commit-locked 2.0-second Arm/Undo Countdown Ring.
 
-**PulseHUD** is a live-data, Read-and-Write companion application built natively for **Even Realities G2** smart glasses (`@evenrealities/even_hub_sdk@0.0.16`, `@evenrealities/pretext@0.1.4`, and verified inside the official `@evenrealities/evenhub-simulator@0.9.5`).
+**PulseHUD** is a Read-and-Write companion app built for **Even Realities G2** smart glasses (`@evenrealities/even_hub_sdk@0.0.16`, `@evenrealities/pretext@0.1.4`, verified in `@evenrealities/evenhub-simulator@0.9.5`).
 
-It unifies **Hyperliquid perpetual markets (live 15m OHLC candles + L2 book + public `clearinghouseState` watcher)**, **Polymarket CLOB prediction odds (24h probability sparklines)**, and a **two-way Coin-Locked Telegram trading desk** into a calm, borderless monochrome 576×288 heads-up display designed around a **3-second glance-and-act loop**—one focused signal on screen, transparent waveguide optics, and a **2.0-second post-tap Undo Safety Window** before every write action commits.
+It brings **Hyperliquid perpetuals (15m OHLC candles, full 5-coin L2 quotes, and public `clearinghouseState` monitoring)**, **Polymarket CLOB odds (24h sparklines)**, and a **Coin-Locked Telegram trading desk** onto the camera-free 576×288 monochrome G2 display. Each screen holds one signal in a few lines, fits inside the 999-byte container budget and ~1 Hz BLE cadence, and puts every write behind a **2.0-second Arm/Undo Countdown Ring** before anything executes.
 
 - **Primary Track:** `02 · Crypto & DeFi` (Hyperliquid + Polymarket)
 - **Secondary Track:** `01 · Messaging & News` (Telegram)
 - **Special Prize Target:** `Best Telegram Integration` & `Grand Prize`
-- **Safety Posture:** Strict **paper-trading & read-only** execution. Zero private keys, zero custody, zero financial advice, and a mandatory **2.0-second Armed Undo Countdown Ring** where any single tap or double-tap cancels cleanly before execution.
+- **Safety Posture:** Paper-trading and read-only execution only. No private keys, no custody, no financial advice, and the seeded $25,000 ledger is explicitly labeled `DEMO`. Every write requires four explicit steps: pick a signal -> open actions -> stage on the Confirm Gate -> tap to arm the 2.0s undo ring (tap again within 2.0s to cancel with zero writes, or let the timer finish to commit).
+- **Telegram Mode Disclosure:** Out of the box (with no bot token set), PulseHUD runs a local **Telegram Desk Bridge** inbox so anyone can test the full alert -> smart reply -> coin-locked trade loop immediately. Setting `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` on your own backend switches delivery to live Telegram Bot API (`getUpdates` + `sendMessage`).
 
 ---
 
-## What's New in PulseHUD v2.0
+## What Changed in PulseHUD v2.1
 
-1. **Borderless 15m Hyperliquid Candlestick & Polymarket Sparkline Graphics (`updateImageRawData`):**
-   - Pure-TypeScript 4-bit monochrome rasterizer & standard RFC-2083 Gray8 PNG encoder (`src/hud/chartRaster.ts`) pushes real 15-minute Hyperliquid OHLC candles (hollow bullish bodies, shaded bearish bodies, volume intensity ticks, dashed `ENT`/`BE` & `LIQ` lines) and Polymarket 24h CLOB probability trajectories via two seamless SDK-compliant `276×68` `ImageContainerProperty` tiles (`552×68` full-width borderless waveguide optics, >70% transparent black pixels).
-2. **Live Public-Address Hyperliquid `clearinghouseState` Watcher (Zero Custody, Read-Only):**
-   - Paste any public `0x...` Hyperliquid address (or use 1-click live active leaderboard presets) to monitor live account value, **margin ratio %**, total unrealized PnL, and per-position **liquidation distance %** right on the G2 lens (`HL Wallet Watch` in the native OS Context Menu) with a live `updateImageRawData` margin & liquidation cushion gauge and 1-tap counter-hedge staging.
-3. **Coin-Locked Telegram -> Trade Loop + Dynamic Risk Controls (`$250/$500/$1k/$2.5k`, 50% Partial Close, Break-Even Stop):**
-   - Incoming Telegram alerts mentioning any Hyperliquid ticker (`BTC`, `ETH`, `SOL`, `HYPE`, etc.) automatically surface `[COIN-LOCK] Open <COIN>-PERP Trade Controls` and 1-tap coin-locked hedge actions right alongside 3 market-aware Smart Reply Drafts.
-   - Open paper perp positions unlock 1-tap **Take 50% Partial Close**, **Move Stop -> Break-Even**, and on-glasses dynamic order size cycling (`$250 / $500 / $1,000 / $2,500`)—zero typing on smart glasses.
-4. **2.0-Second Post-Tap Undo Safety Window (Visual Countdown Ring via `updateImageRawData`):**
-   - Eliminates fat-finger risk on smart glasses: tapping `▶ ARM & EXECUTE` enters a visible **2.0-second armed countdown** with a glowing `76×76` 4-bit Countdown Ring graphic (`2.0s -> 0.0s`) and progress bar. Any single tap or double-tap during the 2.0s window cancels cleanly with zero writes.
-5. **Interactive Zero-Install Browser 576×288 G2 Simulator on GitHub Pages:**
-   - Deployed at **[https://alphonshhhomenicmtu.github.io/pulsehud-g2/](https://alphonshhhomenicmtu.github.io/pulsehud-g2/)** with dual-mode Browser-Direct live feeds (zero local install, HTTP 200, 0 console errors), plus Web Speech API zero-key mic capture and a 30-phrase voice intent evaluation suite (`0` false executions).
+1. **Commit-Locked 4-Phase 2.0s Arm/Undo State Machine (`src/hud/controller.ts`):**
+   - Uses an explicit `phase: 'idle' | 'armed' | 'committing' | 'done'` state machine with a monotonic `commitId` guard.
+   - Tapping on the Confirm Gate arms the `76×76` 4-bit countdown ring (`2.0s -> 0.0s`) at a BLE-friendly 4 Hz cadence. A second tap or double-tap during the window cancels cleanly (`UNDONE`, zero writes).
+   - At `0.0s`, the controller enters `'committing'` synchronously before awaiting execution, locking tap, double-tap, scroll, long-press, and menu events until the receipt settles so a boundary tap can never re-arm or double-send an in-flight order or Telegram message.
+2. **Honest 15m Candle Status (`LIVE` / `SYNC` / `FALLBACK`) + Full 5-Coin L2 Coverage (`server/feeds/hyperliquid.ts`, `src/hud/layout.ts`, `src/hud/chartRaster.ts`):**
+   - Real Hyperliquid `candleSnapshot` bars render under `LIVE`.
+   - If a coin's `candleSnapshot` request fails or returns fewer than 6 bars, PulseHUD never fabricates candles under a `LIVE` pill—it displays `SYNCING 15M CANDLES` with a `SYNC` header.
+   - Offline replay / synthetic fallback candles are explicitly labeled `FALLBACK` in the lens header and stamped `SYN` / `FALLBACK` on the chart tile.
+   - All five rendered Hyperliquid markets (BTC, ETH, SOL, HYPE, plus the top funding-anomaly coin) fetch live `l2Book` quotes; missing quotes fall back to `L2 --` instead of `Live`.
+3. **Nearest-Liquidation-First `clearinghouseState` Wallet Watcher (`server/feeds/hyperliquid.ts`, `src/hud/layout.ts`, `src/companion/panel.ts`):**
+   - Paste any public `0x...` Hyperliquid address (or pick an active preset) to monitor read-only positions.
+   - Positions are sorted by **smallest `liqDistancePct` ascending** (`null` last) so Row 1 on the 576×288 lens, the first cell of the liquidation cushion gauge, and the lead metric card in the companion panel always surface the position closest to liquidation—not just the largest BTC notional.
+4. **Coin-Locked Telegram -> Trade + Demo Paper Risk Controls:**
+   - Telegram alerts mentioning any Hyperliquid ticker (`BTC`, `ETH`, `SOL`, `HYPE`, etc.) surface `[COIN-LOCK] Open <COIN>-PERP Trade Controls` and `[COIN-LOCK] Stage Paper Short` alongside three concise desk reply drafts (written in natural desk phrasing, never naming the glasses).
+   - Open demo paper positions support **Take 50% Partial Close**, **Move Stop -> Break-Even**, and on-glasses order size cycling (`$250 / $500 / $1,000 / $2,500`) with zero typing.
+   - The seeded paper book is clearly prefixed `DEMO` on the lens (`DEMO PAPER BOOK`) and companion panel, and browser-direct mode seeds paper entries after the first live price refresh.
+5. **Verified Voice HUD Glyphs & Defensive PCM Buffering (`src/hud/audio.ts`):**
+   - Voice level meters use firmware-verified `━` / `─` glyphs (verified with 0 LVGL missing-glyph warnings inside `evenhub-simulator@0.9.5`, replacing unverified block elements).
+   - `GlassesAudioCapture.pushPcm()` copies incoming `Uint8Array` frames (`frame.slice()`) so host buffer reuse cannot overwrite earlier audio chunks.
+
+---
+
+## Hardware Fit & Known Platform Notes
+
+- **Camera-free by design:** PulseHUD uses zero camera or photo features. Every screen is built for Even G2's 576×288 monochrome 4-bit green display, single firmware font, 999-byte container limit, and ~1 Hz BLE update budget.
+- **Keep the backend in your hands:** Telegram bot tokens and optional cloud STT keys live strictly on your own Node backend (`server/index.ts`), never inside the `.ehpk` bundle. If the local backend is unreachable (such as on GitHub Pages), `src/api/client.ts` switches to browser-direct public market fetches.
+- **iOS backgrounding note:** On iPhone, the Even app currently suspends Even Hub WebView polling and microphone audio while backgrounded; PulseHUD keeps HUD state intact across `FOREGROUND_EXIT` / `FOREGROUND_ENTER` and resyncs live market state automatically when foregrounded again.
 
 ---
 
 ## Verified Simulator Screenshots (Even Hub Simulator `v0.9.5`)
 
-Every HUD capture below was rendered by the real LVGL engine inside `@evenrealities/evenhub-simulator@0.9.5` against live Hyperliquid (`metaAndAssetCtxs`, `l2Book`, `candleSnapshot`, `clearinghouseState`) and Polymarket (`gamma-api`, `clob`) APIs (**0 console errors**, **0 missing LVGL glyphs**). Raw transparent waveguide RGBA PNGs are preserved in `docs/screenshots/raw/`, while `docs/screenshots/` composites them onto a dark obsidian lens (`#040A06`) for legibility on any background.
+Every HUD capture below was rendered by the LVGL engine inside `@evenrealities/evenhub-simulator@0.9.5` against live Hyperliquid (`metaAndAssetCtxs`, `l2Book`, `candleSnapshot`, `clearinghouseState`) and Polymarket (`gamma-api`, `clob`) APIs (**0 console errors**, **0 missing LVGL glyphs**, including the voice HUD). Raw transparent RGBA captures are stored in `docs/screenshots/raw/`, while `docs/screenshots/` composites them onto a dark lens (`#040A06`) for readability.
 
 | 1. Borderless 15m Hyperliquid OHLC Candles (`updateImageRawData`) | 2. Live Polymarket CLOB 24h Sparkline (`updateImageRawData`) |
 |---|---|
@@ -44,10 +61,10 @@ Every HUD capture below was rendered by the real LVGL engine inside `@evenrealit
 | ![Confirm Gate Standby](docs/screenshots/05-confirm-telegram-reply.png) | ![Armed Undo Countdown Ring](docs/screenshots/06-armed-undo-countdown-ring.png) |
 | **7. Confirmed Reply Delivery Toast** | **8. Dynamic Size + 50% Partial + Break-Even Controls** |
 | ![Executed Toast HUD](docs/screenshots/07-executed-toast-feed.png) | ![Hyperliquid Risk Controls](docs/screenshots/08-actions-hyperliquid-controls.png) |
-| **9. Native G2 OS Contextual Menu** | **10. Live Public `clearinghouseState` HL Wallet Watcher** |
+| **9. Native G2 OS Contextual Menu** | **10. Nearest-Liquidation `clearinghouseState` Wallet Watcher** |
 | ![G2 Context Menu](docs/screenshots/09-context-menu-overlay.png) | ![Hyperliquid Wallet Watcher](docs/screenshots/10-wallet-watcher-clearinghouse.png) |
-| **11. Live Mark-to-Market Paper Ledger** | **12. Companion WebView Console (macOS WKWebView)** |
-| ![Paper Portfolio Ledger](docs/screenshots/11-portfolio-ledger.png) | ![Companion WebView](docs/screenshots/12-companion-webview.png) |
+| **11. Demo Paper Book Ledger** | **12. Companion WebView Console (macOS WKWebView)** |
+| ![Demo Paper Portfolio Ledger](docs/screenshots/11-portfolio-ledger.png) | ![Companion WebView](docs/screenshots/12-companion-webview.png) |
 
 ---
 
@@ -56,22 +73,22 @@ Every HUD capture below was rendered by the real LVGL engine inside `@evenrealit
 ```mermaid
 flowchart LR
     subgraph G2["Even Realities G2 Glasses (BLE 5.2)"]
-        LENS["576x288 Monochrome Green<br/>Borderless Text + 4-bit PNG Image Tiles + OS Menu"]
+        LENS["576x288 Monochrome Green<br/>Text + Dual 276x68 PNG Tiles + 76x76 Ring + OS Menu"]
         INPUT["Temple Touchpad & R1 Ring<br/>Tap · 2xTap · Swipe · Hold · Menu"]
         MIC["4-Mic Array<br/>16 kHz s16le Mono PCM"]
     end
 
     subgraph WEBVIEW["Even Hub WebView / Browser G2 Simulator (Vite + TypeScript)"]
         SDK["@evenrealities/even_hub_sdk v0.0.16<br/>textContainerUpgrade + updateImageRawData + pretext"]
-        RASTER["chartRaster.ts (Pure TS 4-bit Gray8 -> PNG)<br/>15m OHLC Candles · PM Sparkline · 2.0s Ring · Liq Gauge"]
-        CTRL["PulseHudController<br/>2.0s Post-Tap Undo State Machine + Coin-Lock TG->Trade"]
-        COMP["Companion Console & Interactive Web G2 Simulator<br/>Wallet Watcher · Voice Bar · TG Desk · Audit Log"]
+        RASTER["chartRaster.ts (Pure TS 4-bit Gray8 -> PNG)<br/>15m Candles · PM Sparkline · 2.0s Ring · Nearest-Liq Gauge"]
+        CTRL["PulseHudController<br/>4-Phase Commit-Locked 2.0s Undo State Machine + Coin-Lock"]
+        COMP["Companion Console & Web G2 Simulator<br/>Nearest-Liq Watcher · Voice Bar · TG Desk · Audit Log"]
     end
 
-    subgraph SERVER["Companion Backend (:8792) OR Browser-Direct Engine (GitHub Pages)"]
+    subgraph SERVER["User Backend (:8792) OR Browser-Direct Mode (GitHub Pages)"]
         HUB["MarketHub Poller + clearinghouseState Watcher"]
-        LEDGER["Paper Execution Engine<br/>Long/Short · 50% Partial · Break-Even Stop · Receipts"]
-        TG["Coin-Locked Telegram Bridge<br/>Ticker Auto-Detect · Live Bot API · Smart Drafts"]
+        LEDGER["Demo Paper Execution Engine<br/>Long/Short · 50% Partial · Break-Even Stop · Receipts"]
+        TG["Coin-Locked Telegram Bridge<br/>Ticker Auto-Detect · Local Desk Bridge / Live Bot API"]
         VOICE["Voice Pipeline<br/>PCM->WAV · Web Speech / Whisper / Deepgram · Intent Parser"]
     end
 
@@ -99,15 +116,17 @@ flowchart LR
 
 ---
 
-## Controls & Read-and-Write Safety Loop
+## Controls & Read-and-Write Safety Flow
 
-| Gesture (G2 Temple / R1 Ring / Web Keys) | Feed Screen | Action Picker | Confirm Gate (Standby) | Armed 2.0s Undo Window | HL Wallet Watch / Portfolio |
-|---|---|---|---|---|---|
-| **Swipe Up / Down (`↑ / ↓`)** | Next / previous signal (flicker-free in-place text + `updateImageRawData` chart update) | Move `▶` option cursor | Toggle `▶ ARM` / `○ Cancel` | — | Return to Feed |
-| **Single Tap (`Enter / Space`)** | Open Write Actions / Smart Replies / Coin-Lock Trade | Stage write OR cycle `$250/$500/$1k/$2.5k` OR jump to Coin-Locked coin | **Arm 2.0s Undo Countdown Ring** (zero execution yet!) | **UNDO & CANCEL CLEANLY (0 writes!)** | Stage counter-hedge / flatten top position |
-| **Double-Tap (`Esc`)** | Native G2 exit dialog via `shutDownPageContainer(1)` | Back to Feed | Cancel & return to Feed | **UNDO & CANCEL CLEANLY (0 writes!)** | Back to Feed |
-| **Long Press** | Open G2 4-Mic Voice Command HUD (`audioControl(true)`) | Open Voice Command HUD | — | — | Open Voice Command HUD |
-| **OS Menu (`M`)** | Jump to `All Signals`, `Hyperliquid 15m`, `Polymarket Odds`, `Telegram Desk`, `HL Wallet Watch`, `Paper Portfolio`, or `Send Digest -> TG` | Same | Same | Cancels armed countdown & navigates | Same |
+A complete write takes three taps plus the 2.0s safety window (feed -> actions -> arm -> countdown expiry):
+
+| Gesture (G2 Temple / R1 Ring / Web Keys) | Feed Screen | Action Picker | Confirm Gate (`idle`) | Armed 2.0s Window (`armed`) | In-Flight (`committing`) | HL Wallet Watch / Demo Book |
+|---|---|---|---|---|---|---|
+| **Swipe Up / Down (`↑ / ↓`)** | Next / previous signal (in-place text + `updateImageRawData`) | Move `▶` option cursor | Toggle `▶ ARM 2.0s` / `○ Cancel` | Ignored | Locked | Return to Feed |
+| **Single Tap (`Enter / Space`)** | Open Write Actions / Smart Replies / Coin-Lock Jump | Stage on Confirm Gate OR cycle size OR jump to coin | **Arm 2.0s Undo Ring** (0 writes yet) | **UNDO & CANCEL (`UNDONE`, 0 writes)** | **Locked** (cannot re-arm or double-send) | Stage counter-hedge for nearest-liq coin / flatten top position |
+| **Double-Tap (`Esc`)** | Native G2 exit dialog via `shutDownPageContainer(1)` | Back to Feed | Cancel & return to Feed | **UNDO & CANCEL (`UNDONE`, 0 writes)** | **Locked** | Back to Feed |
+| **Long Press** | Open G2 4-Mic Voice HUD (`audioControl(true)`) | Open Voice HUD | Open Voice HUD | Cancels armed countdown & opens Voice HUD | **Locked** | Open Voice HUD |
+| **OS Menu (`M`)** | Switch channel, `HL Wallet Watch`, `Paper Portfolio`, or `Send Digest -> TG` | Same | Same | Cancels armed countdown & navigates | **Locked** | Same |
 
 ---
 
@@ -116,7 +135,7 @@ flowchart LR
 ### Prerequisites
 - **Node.js** `>= 20` (tested on `v24.14.0`)
 - **npm** `>= 10`
-- No physical Even G2 glasses or paid API keys are required to run live market feeds, 15m charts, `clearinghouseState` wallet watch, and full simulator testing.
+- No physical Even G2 glasses or paid API keys are required to run live market feeds, 15m charts, `clearinghouseState` wallet monitoring, and simulator verification.
 
 ### 1. Install dependencies
 
@@ -132,9 +151,9 @@ cp .env.example .env
 
 Optional environment variables in `.env` (never committed):
 - `WATCHED_HL_ADDRESS` — default public `0x...` Hyperliquid address to watch via read-only `clearinghouseState`.
-- `TELEGRAM_BOT_TOKEN` & `TELEGRAM_CHAT_ID` — enables live two-way Telegram Bot polling (`getUpdates`, `/status`, `/positions`, `/odds`) and real outbound `sendMessage` delivery.
-- `OPENAI_API_KEY` or `DEEPGRAM_API_KEY` — optional cloud STT for raw G2 16 kHz PCM capture (Browser Web Speech API + Companion Voice Bar work with zero keys).
-- `OFFLINE_REPLAY=true` — forces verified offline replay mode for air-gapped stage demos.
+- `TELEGRAM_BOT_TOKEN` & `TELEGRAM_CHAT_ID` — switches Telegram from local Desk Bridge mode to live Bot API (`getUpdates`, `/status`, `/positions`, `/odds`, and outbound `sendMessage`).
+- `OPENAI_API_KEY` or `DEEPGRAM_API_KEY` — optional cloud STT for raw G2 16 kHz PCM capture (Browser Web Speech API and the companion Voice Bar work with zero keys).
+- `OFFLINE_REPLAY=true` — forces offline replay mode (labeled `FALLBACK` / `REPLAY`) for air-gapped demos.
 
 ### 3. Run locally & launch official Even Hub Simulator
 
@@ -149,29 +168,29 @@ npm run simulate
 ### 4. Tests, Packaging (`.ehpk`), GitHub Pages Static Build & Automated Simulator QA
 
 ```bash
-# TypeScript strict check + Vitest unit & eval suite (26 tests incl. 30-phrase voice eval & 2.0s undo)
+# TypeScript strict check + Vitest unit & regression suite
 npm run typecheck
 npm test
 
-# Build & package updated v2.0.0 Even Hub .ehpk bundle
+# Build & package v2.1.0 Even Hub .ehpk bundle
 npm run pack
 
-# Build zero-install static Browser 576x288 G2 Simulator for GitHub Pages
+# Build static Browser 576x288 G2 Simulator for GitHub Pages
 npm run build:pages
 
-# Automated end-to-end verification in real evenhub-simulator v0.9.5
+# Automated end-to-end verification in evenhub-simulator v0.9.5
 npm run verify:sim
 ```
 
 ---
 
-## Engineering Highlights & G2 Best Practices
+## Engineering Notes & Even G2 Compliance
 
-- **Hardware-Compliant Dual-Tile Graphics (`src/hud/chartRaster.ts`):** Even G2 firmware caps `ImageContainerProperty` at `288×144` px per container. PulseHUD renders full-width `552×68` 4-bit monochrome charts into a quantized Gray8 pixel buffer (>70% transparent black pixels) and slices them cleanly into two adjacent `276×68` RFC-2083 PNG tiles pushed via `bridge.updateImageRawData()`, plus a dedicated `76×76` 2.0-second Undo Countdown Ring on the Confirm Gate.
-- **Zero-Scrollbar LVGL Fit (`src/hud/layout.ts`):** Every text container enforces strict `@evenrealities/pretext` wrapping and exact 27 px firmware line-height budgets so zero internal LVGL scrollbars steal ring/temple swipes, and uses exclusively verified Even G2 firmware glyphs (**0 LVGL missing-glyph warnings**).
-- **Protobuf Zero-Value Input Safety (`src/hud/events.ts`):** Resolves omitted zero-value `OsEventTypeList.CLICK_EVENT` strictly inside non-null `sysEvent` / `textEvent` / `listEvent` envelopes so incoming `audioEvent` PCM frames and `menuItemClickEvent` payloads never trigger phantom clicks.
-- **2.0-Second Post-Tap Undo Safety State Machine (`src/hud/controller.ts`):** Decouples tap intent from destructive execution with a live ticking countdown ring and immediate single-tap/double-tap cancellation before any write reaches the paper ledger or Telegram Bot API.
-- **Even Hub QA Exit Compliance:** Root-page double-tap invokes `bridge.shutDownPageContainer(1)` for the native Even OS exit confirmation overlay, and `FOREGROUND_ENTER` / `FOREGROUND_EXIT` menu events preserve full app state.
+- **Dual-Tile Graphics (`src/hud/chartRaster.ts`):** Even G2 caps `ImageContainerProperty` at `288×144` px per container. PulseHUD renders `552×68` 4-bit monochrome charts into a quantized Gray8 buffer (>70% transparent black pixels) and slices them into two adjacent `276×68` RFC-2083 PNG tiles via `bridge.updateImageRawData()`, plus a `76×76` 2.0-second Undo Countdown Ring on the Confirm Gate.
+- **Zero-Scrollbar LVGL Fit (`src/hud/layout.ts`):** Every text box uses `@evenrealities/pretext` line wrapping and 27 px firmware line-height slack so LVGL never steals temple/ring swipes, using only verified Even G2 glyphs (**0 missing-glyph warnings**).
+- **Protobuf Zero-Value Input Handling (`src/hud/events.ts`):** Resolves omitted zero-value `OsEventTypeList.CLICK_EVENT` strictly inside non-null `sysEvent` / `textEvent` / `listEvent` envelopes so incoming `audioEvent` PCM frames and `menuItemClickEvent` payloads never produce phantom clicks.
+- **Commit-Locked 2.0s Undo State Machine (`src/hud/controller.ts`):** Transitions `idle -> armed -> committing -> done` with a `commitId` generation check so tapping at the 0.0s boundary can never re-arm or double-execute an in-flight write.
+- **Even Hub QA Exit Compliance:** Root-page double-tap calls `bridge.shutDownPageContainer(1)` for the native Even OS exit confirmation overlay, and `FOREGROUND_ENTER` / `FOREGROUND_EXIT` preserve app state.
 
 ---
 

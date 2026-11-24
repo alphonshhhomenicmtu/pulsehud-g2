@@ -127,26 +127,32 @@ Launched via `evenhub-simulator http://localhost:5173 --automation-port 9898`:
 
 ---
 
-## 6. Product Design: **PulseHUD** — Glanceable DeFi & Telegram Trading Copilot for Even G2
+## 6. Product Design: **PulseHUD v2.1** — Glanceable DeFi & Telegram HUD for Even G2
 
 ### Value Proposition
-Active crypto and prediction-market traders miss fast moves — a Hyperliquid funding flip, a Polymarket odds swing, or an urgent alpha message from their Telegram trading desk — whenever they step away from their monitors. Pulling out a phone breaks focus in meetings, while walking, or on the go.
+Active crypto and prediction-market traders miss fast moves — a Hyperliquid funding flip, a Polymarket odds swing, a rising liquidation risk on a watched wallet, or an urgent alert from their Telegram trading desk — whenever they step away from their desk. Pulling out a phone interrupts meetings and conversations.
 
-**PulseHUD** turns Even G2 glasses into a calm, monochrome **Read-and-Write trading & Telegram desk** built around a 3-second glance-and-act loop:
+**PulseHUD** turns camera-free Even G2 smart glasses into a monochrome **Read-and-Write trading & Telegram HUD** designed around one focused signal per screen and a commit-locked 2.0-second Arm/Undo safety loop:
 
-1. **Glance (Read — Live Data, Zero Clutter):**
-   - **Feed Card HUD** (one crisp signal per screen, never a crowded dashboard):
-     - **Hyperliquid Perps** (live `api.hyperliquid.xyz/info` `metaAndAssetCtxs` + `l2Book`): live mark price, 24h move, annualized funding rate spikes, open interest, and live paper/read-only position PnL & liquidation cushion.
-     - **Polymarket Odds** (live `gamma-api.polymarket.com` + `clob.polymarket.com` midpoint & L2 spread): live high-volume crypto/macro YES/NO odds, 24h shift, orderbook spread, and paper bet PnL.
-     - **Telegram Desk & Alerts** (live Telegram Bot API `getUpdates` + `sendMessage` + inline callback bridge, with an instant local interactive Desk Inbox when no bot token is configured so judges can test the complete round-trip in 10 seconds): filtered messages from pinned desk chats/channels with instant smart-draft replies.
-   - Graceful **Live + Verified Snapshot Fallback**: connects directly to live public Polymarket & Hyperliquid APIs on boot (and polls every 10s), automatically caching the latest verified live market frame for zero-downtime offline replay during live stage demos.
+1. **Glance (Read — Live Public Data, Honest Status Labels):**
+   - **Feed Card HUD** (one signal per 576 × 288 screen, borderless text + dual `276 × 68` 4-bit PNG image tiles via `updateImageRawData`):
+     - **Hyperliquid Perps** (`api.hyperliquid.xyz/info` `metaAndAssetCtxs`, `l2Book`, and `candleSnapshot` across all 5 rendered coins): live mark price, 24h change, annualized funding APR, open interest, L2 spread, and borderless 15m OHLC candles with entry/liquidation guides. Real `candleSnapshot` bars carry a `LIVE` header; unavailable snapshots render `SYNCING 15M CANDLES` under `SYNC`; offline synthetic replay candles are explicitly tagged `FALLBACK` / `SYN` (never `LIVE`).
+     - **Polymarket Odds** (`gamma-api.polymarket.com` + `clob.polymarket.com` `/midpoint`, `/book`, `/prices-history`): live YES/NO odds, 24h shift, CLOB spread, and 24h probability sparklines (`24H CLOB` when live history is loaded, `24H EST` when interpolated).
+     - **Telegram Desk & Alerts** (Telegram Bot API `getUpdates` + `sendMessage` when `TELEGRAM_BOT_TOKEN` is configured, or local interactive **Desk Bridge** inbox out of the box with zero keys): pinned desk messages with automatic ticker detection (`BTC`, `ETH`, `SOL`, `HYPE`, etc.) and three market-aware smart reply drafts.
+   - **Public `clearinghouseState` Wallet Watcher (Read-Only, Nearest Liquidation First):**
+     - Watches any public `0x...` Hyperliquid address and sorts open positions by **smallest `liqDistancePct` ascending** (`null` last). Row 1 on the lens (`NEAREST LIQ`), the first bar of the `552 × 56` risk gauge, and the lead card in the companion panel always surface the position closest to liquidation.
+   - **Demo Paper Book (`DEMO PAPER BOOK`):**
+     - Seeded $25,000 paper book is explicitly prefixed `DEMO` on both the G2 lens and companion console, marked to live market prices after initial sync.
 
-2. **Act in Seconds (Write — One Tap, Ring, or Short Voice Phrase):**
-   - **Single Tap** on any live signal opens a focused **1-Tap Action / Confirm Card** with smart defaults (never typing on glasses):
-     - On a **Hyperliquid** perp alert -> stage a **Paper Hedge / Limit Order** (e.g., `PAPER SHORT 0.05 BTC @ $61,580` or `TIGHTEN STOP -1.5%`) OR **Share Alert to Telegram Desk** (`POST TO TG DESK`).
-     - On a **Polymarket** odds alert -> stage a **Paper YES/NO Bet** (e.g., `PAPER YES $50 @ 62c`) OR **Share Odds Call to Telegram**.
-     - On a **Telegram** desk message -> cycle 3 context-aware **1-Tap Smart Replies** (e.g., `Copied - hedging 25% now`, `Holding flat, watching funding`, `Ping me if odds cross 70c`) OR hold to **Dictate Voice Reply**.
-   - **Explicit Human Confirmation Gate:** Every write action enters a dedicated, high-contrast **CONFIRM CARD** (`> CONFIRM [1 TAP]` / `Swipe: Switch Option` / `Double-Tap: Cancel`) — zero accidental orders, full safety audit trail, paper-only execution ledger, and real Telegram Bot delivery when `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are set.
-   - **Push-to-Talk Voice Command (`LONG_PRESS` / `LONG_PRESS_RELEASE`):** Captures real 16 kHz s16le PCM from `bridge.audioControl(true)` (`audioEvent`), streams to our backend `/api/voice/command` (supports real OpenAI Whisper / Deepgram STT when configured, plus deterministic voice-intent parsing + simulator voice command triggers in companion UI), turning short phrases like *"Buy 50 yes Bitcoin"*, *"Short 0.05 BTC paper"*, *"Reply to desk: taking profit now"*, or *"Send BTC alert to Telegram"* directly into a 1-tap Confirmation Card!
-   - **Native G2 Contextual Menu (`menuObject`):** Instant hands-free jump between `Signals Feed`, `Hyperliquid Perps`, `Polymarket Odds`, `Telegram Desk`, `Paper Ledger`, and `Broadcast Digest -> TG`.
-   - **Companion WebView Control Panel (Phone / Simulator Left Pane):** Clean dark-emerald companion console showing live API connectivity status, real-time paper portfolio & PnL ledger, Telegram Bot pairing/setup + live two-way Desk chat emulator (mirrored to real Telegram when configured), live audio/voice command bar, and live mirrored glasses telemetry.
+2. **Act with Safety (Write — Stage, Arm 2.0s Undo Ring, Cancel or Commit):**
+   - **Action Picker (Single Tap from Feed):** Opens smart defaults with zero typing on glasses:
+     - **Hyperliquid:** Stage Paper Short/Long, cycle order size (`$250 / $500 / $1,000 / $2,500`), Take 50% Partial Close, Move Stop -> Break-Even, or post an alert to Telegram.
+     - **Polymarket:** Stage Paper YES/NO, cycle stake (`$25 / $50 / $100 / $250`), or share odds to Telegram.
+     - **Telegram:** Pick one of 3 natural desk reply drafts, jump via `[COIN-LOCK] Open <COIN>-PERP Trade Controls`, or stage a coin-locked paper hedge directly.
+   - **4-Phase Commit-Locked Confirm Gate (`idle -> armed -> committing -> done`):**
+     - Every write lands on the double-bordered Confirm Gate with a `76 × 76` 4-bit Countdown Ring (`▶ ARM 2.0s UNDO [TAP]` / `○ Cancel`).
+     - Tapping arms the **2.0-second Undo Countdown Ring** (`2.0s -> 0.0s`, 4 Hz updates). Any single tap or double-tap during the 2.0s window cancels cleanly (`UNDONE`, zero writes).
+     - At `0.0s`, the controller enters `'committing'` synchronously before awaiting execution and locks tap, double-tap, scroll, long-press, and menu events (plus a `commitId` generation check) until the receipt settles, preventing any 0.0s boundary tap from re-arming or double-sending.
+   - **Push-to-Talk Voice Command (`LONG_PRESS` / `LONG_PRESS_RELEASE`):** Captures 16 kHz s16le PCM from `bridge.audioControl(true)` (`audioEvent`) with defensive `frame.slice()` copying and firmware-verified `━` / `─` meter glyphs, routes through `/api/voice/command` (optional Whisper/Deepgram STT, plus zero-key Web Speech API and companion Voice Bar), and stages parsed commands onto the Confirm Gate.
+   - **Native G2 Contextual Menu (`menuObject`) & iOS Lifecycle:** Preserves all 7 menu items (`All Signals`, `Hyperliquid 15m`, `Polymarket Odds`, `Telegram Desk`, `HL Wallet Watch`, `Paper Portfolio`, `Send Digest -> TG`) across `rebuildPageContainer`, handles `FOREGROUND_ENTER` / `FOREGROUND_EXIT` non-destructively (noting that iOS suspends Even Hub WebView polling and mic capture while backgrounded and resyncs on return), and exits from root via `shutDownPageContainer(1)`.
+   - **Companion WebView Console:** Mirrors the 576 × 288 G2 display with live API badges, nearest-liquidation wallet watcher, Telegram Desk Bridge / optional `@BotFather` pairing, voice staging bar, and demo paper audit receipts.

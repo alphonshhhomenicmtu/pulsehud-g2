@@ -28,7 +28,8 @@ export class GlassesAudioCapture {
       return { durationMs: this.getDurationMs(), level: 0 }
     }
     if (this.totalBytes + frame.byteLength <= this.maxBytes) {
-      this.chunks.push(frame)
+      // Copy PCM bytes so reused host audio buffers never overwrite prior frames
+      this.chunks.push(frame.slice())
       this.totalBytes += frame.byteLength
     }
 
@@ -84,13 +85,10 @@ export class GlassesAudioCapture {
 }
 
 export function renderVoiceMeter(level: number, tick: number): string {
-  const glyphs = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
-  const bars: string[] = []
-  for (let i = 0; i < 8; i += 1) {
-    const wave = 0.5 + 0.5 * Math.sin(tick * 0.9 + i * 0.85)
-    const amplitude = Math.max(0.08, Math.min(1, level * 0.75 + wave * 0.35))
-    const idx = Math.min(glyphs.length - 1, Math.floor(amplitude * glyphs.length))
-    bars.push(glyphs[idx])
-  }
-  return bars.join('')
+  // Uses firmware-verified Even G2 LVGL glyphs (━ / ─) with 0 missing-glyph risk
+  const segments = 8
+  const wave = 0.5 + 0.5 * Math.sin(tick * 0.9)
+  const amplitude = Math.max(0.12, Math.min(1, level * 0.8 + wave * 0.25))
+  const filled = Math.max(1, Math.min(segments, Math.round(amplitude * segments)))
+  return `${'━'.repeat(filled)}${'─'.repeat(segments - filled)}`
 }

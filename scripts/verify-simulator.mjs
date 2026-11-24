@@ -362,6 +362,10 @@ try {
   await simInput('click', 850)
   await saveShot('/api/screenshot/glasses', '11-portfolio-ledger.png')
 
+  // Verify Voice HUD screen renders cleanly with 0 missing LVGL glyphs (long_press -> double_click back)
+  await simInput('long_press', 700)
+  await simInput('double_click', 500)
+
   // 12: Companion WebView screenshot (native macOS WKWebView capture)
   await saveShot('/api/screenshot/webview', '12-companion-webview.png', false)
 
@@ -400,7 +404,7 @@ try {
 
   const report = {
     verifiedAt: new Date().toISOString(),
-    version: '2.0.0',
+    version: '2.1.0',
     simulatorVersion: '0.9.5',
     sdkVersion: '0.0.16',
     bridgeMode,

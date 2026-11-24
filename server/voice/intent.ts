@@ -121,7 +121,7 @@ function extractCoin(lower: string): string | undefined {
 
 /**
  * Deterministic voice-to-StagedAction parser.
- * Every parsed intent ALWAYS returns a staged action requiring explicit 1-tap arming + 2.0s undo window on G2.
+ * Every parsed intent returns a staged action on the Confirm Gate; tapping arms the 2.0s undo ring.
  */
 export function parseVoiceIntent(
   rawTranscript: string,

@@ -438,10 +438,12 @@ export function renderHyperliquidCandlesTiles(
   const canvas = new Gray4Canvas(totalW, totalH)
 
   const candles = signal.candles15m.slice(-24)
-  if (candles.length === 0) {
+  if (signal.candlesSource === 'unavailable' || candles.length < 6) {
     canvas.drawMiniText(8, 30, 'SYNCING 15M CANDLES', 8, 1)
-    return sliceToDualTiles(canvas, 12, 128, `hl-empty:${signal.coin}`)
+    return sliceToDualTiles(canvas, 12, 128, `hl-sync:${signal.coin}`)
   }
+
+  const isSynthetic = signal.candlesSource === 'synthetic'
 
   let minPx = Infinity
   let maxPx = -Infinity
@@ -484,9 +486,9 @@ export function renderHyperliquidCandlesTiles(
   canvas.drawDashedHLine(chartLeft, chartRight, Math.round((chartTop + chartBottom) / 2), 2, 2, 8)
   canvas.drawDashedHLine(chartLeft, chartRight, chartBottom, 2, 2, 6)
 
-  // Left-side compact price axis & timeframe markers
+  // Left-side compact price axis & timeframe / source markers
   canvas.drawMiniText(2, 3, formatAxisPrice(maxPx), 8, 1)
-  canvas.drawMiniText(2, 27, '15m', 6, 1)
+  canvas.drawMiniText(2, 27, isSynthetic ? 'SYN' : '15m', isSynthetic ? 9 : 6, 1)
   canvas.drawMiniText(2, 49, formatAxisPrice(minPx), 8, 1)
 
   // Optional Entry / Break-Even Stop dashed line
@@ -540,12 +542,15 @@ export function renderHyperliquidCandlesTiles(
     }
   }
 
-  // Live mark price indicator dot on the right edge
+  // Live mark price indicator dot on the right edge (plus honest FALLBACK stamp if synthetic)
   const markY = toY(signal.markPx)
   canvas.drawCircleDot(chartRight + 4, markY, 3, 15)
+  if (isSynthetic) {
+    canvas.drawMiniText(chartRight - 32, 60, 'FALLBACK', 9, 1)
+  }
 
   const lastCandle = candles[candles.length - 1]
-  const fp = `hl:${signal.coin}:${signal.markPx.toFixed(2)}:${lastCandle.t}:${lastCandle.c}:${refEntry ?? 0}:${refLiq ?? 0}:${paperPos?.stopLossMode ?? ''}`
+  const fp = `hl:${signal.coin}:${signal.candlesSource}:${signal.markPx.toFixed(2)}:${lastCandle.t}:${lastCandle.c}:${refEntry ?? 0}:${refLiq ?? 0}:${paperPos?.stopLossMode ?? ''}`
   return sliceToDualTiles(canvas, 12, 128, fp)
 }
 
@@ -602,9 +607,15 @@ export function renderPolymarketSparklineTiles(signal: PolymarketOddsSignal): Re
 
   // Current live CLOB midpoint highlight dot
   canvas.drawCircleDot(prevX, prevY, 3, 15)
-  canvas.drawMiniText(chartRight - 28, 60, '24H CLOB', 6, 1)
+  canvas.drawMiniText(
+    chartRight - 28,
+    60,
+    signal.sparklineSource === 'live' ? '24H CLOB' : '24H EST',
+    6,
+    1,
+  )
 
-  const fp = `pm:${signal.marketId}:${signal.yesPrice.toFixed(4)}:${pts.length}`
+  const fp = `pm:${signal.marketId}:${signal.sparklineSource ?? 'synthetic'}:${signal.yesPrice.toFixed(4)}:${pts.length}`
   return sliceToDualTiles(canvas, 12, 128, fp)
 }
 
@@ -616,6 +627,7 @@ export function renderUndoCountdownRing(
   remainingMs: number,
   totalMs: number,
   armed: boolean,
+  committing = false,
 ): RenderedImageSlot {
   const size = 76
   const canvas = new Gray4Canvas(size, size)
@@ -623,9 +635,13 @@ export function renderUndoCountdownRing(
   const cy = 38
 
   // Subtle full background ring track
-  canvas.drawRingArc(cx, cy, 34, 29, 1, armed ? 4 : 3)
+  canvas.drawRingArc(cx, cy, 34, 29, 1, armed || committing ? 4 : 3)
 
-  if (armed) {
+  if (committing) {
+    canvas.drawRingArc(cx, cy, 35, 28, 1, 15)
+    canvas.drawMiniText(cx - 15, cy - 8, 'SEND', 15, 1)
+    canvas.drawMiniText(cx - 15, cy + 4, 'LOCK', 10, 1)
+  } else if (armed) {
     const ratio = Math.max(0, Math.min(1, remainingMs / Math.max(1, totalMs)))
     canvas.drawRingArc(cx, cy, 35, 28, ratio, 15)
 
@@ -646,7 +662,7 @@ export function renderUndoCountdownRing(
     canvas.drawMiniText(cx - 15, cy + 7, 'SAFE', 8, 1)
   }
 
-  const bucket = armed ? Math.ceil(remainingMs / 120) : -1
+  const bucket = committing ? -2 : armed ? Math.ceil(remainingMs / 200) : -1
   const pngBytes = encodeGray8ToPng(canvas.pixels, size, size)
   return {
     containerID: 7,
@@ -657,7 +673,7 @@ export function renderUndoCountdownRing(
     height: size,
     pixels: canvas.pixels,
     pngBytes,
-    fingerprint: `ring:${armed ? 1 : 0}:${bucket}`,
+    fingerprint: `ring:${committing ? 'commit' : armed ? 'armed' : 'idle'}:${bucket}`,
   }
 }
 
@@ -717,6 +733,7 @@ export function renderWalletRiskBarTiles(wallet: WatchedWalletSnapshot): Rendere
     }
   }
 
-  const fp = `wallet:${wallet.address}:${wallet.marginRatioPct.toFixed(1)}:${wallet.positions.length}:${wallet.positions[0]?.unrealizedPnlUsd.toFixed(0) ?? 0}`
+  const nearest = wallet.positions[0]
+  const fp = `wallet:${wallet.address}:${wallet.marginRatioPct.toFixed(1)}:${wallet.positions.length}:${nearest?.coin ?? ''}:${nearest?.liqDistancePct ?? 'none'}:${nearest?.unrealizedPnlUsd.toFixed(0) ?? 0}`
   return sliceToDualTiles(canvas, 12, 138, fp)
 }

@@ -63,8 +63,8 @@ export function mountCompanionPanel(
         <div class="brand">
           <span class="pulse-dot" id="sse-dot"></span>
           <div>
-            <h1>PulseHUD <span class="ver-pill">v2.0</span></h1>
-            <p class="subtitle">Even Realities G2 (576×288) · Borderless 15m Candles · HL Wallet Watcher · Coin-Locked TG · 2.0s Undo</p>
+            <h1>PulseHUD <span class="ver-pill">v2.1</span></h1>
+            <p class="subtitle">Even Realities G2 (576×288) · 15m Candles · Nearest-Liq Wallet Watch · Coin-Locked TG · 2.0s Undo Ring</p>
           </div>
         </div>
         <div class="top-badges">
@@ -123,7 +123,7 @@ export function mountCompanionPanel(
             <span class="chip" id="stt-chip">STT: local</span>
           </div>
           <p class="hint">
-            Every write action enters a <strong>2.0-second Armed Undo Countdown Ring</strong> on the G2 lens — single tap or double-tap cancels cleanly before execution.
+            Tap arms a <strong>2.0-second Undo Countdown Ring</strong> on the G2 lens; a second tap cancels with zero writes, otherwise it commits and locks inputs until receipt.
           </p>
           <form class="inline-form" id="voice-form">
             <input
@@ -202,11 +202,11 @@ export function mountCompanionPanel(
 
         <article class="panel">
           <div class="panel-head">
-            <h2>Paper Portfolio &amp; Confirmed Write Audit Log</h2>
-            <span class="chip chip-safe">PAPER ONLY · 2.0s UNDO SAFE</span>
+            <h2>Demo Paper Book &amp; Confirmed Write Audit Log</h2>
+            <span class="chip chip-safe">DEMO PAPER ONLY · 2.0s UNDO SAFE</span>
           </div>
           <div class="metrics-strip" id="portfolio-metrics"></div>
-          <h3 class="section-label">Open Paper Positions (Live Mark-to-Market + Break-Even Stops)</h3>
+          <h3 class="section-label">Demo Paper Positions (Live Mark-to-Market + Break-Even Stops)</h3>
           <div class="feed-list" id="positions-list"></div>
           <h3 class="section-label">Confirmed Execution Receipts</h3>
           <div class="feed-list" id="receipts-list"></div>
@@ -516,8 +516,15 @@ export function mountCompanionPanel(
         : 'Standalone Preview'
     badgeBridge.className = `badge ${bridgeConnected || staticMode ? 'ok' : 'warn'}`
 
-    badgeHl.textContent = `HL: ${health.hyperliquid.status.toUpperCase()}${health.hyperliquid.candlesLoaded ? ' +15m' : ''}${health.hyperliquid.latencyMs ? ` ${health.hyperliquid.latencyMs}ms` : ''}`
-    badgeHl.className = `badge ${health.hyperliquid.status === 'live' ? 'ok' : 'warn'}`
+    const anySyntheticHl = model.state.hyperliquid.some((s) => s.candlesSource === 'synthetic')
+    const hlStatusLabel =
+      health.hyperliquid.status !== 'live' || anySyntheticHl
+        ? 'FALLBACK'
+        : health.hyperliquid.candlesLoaded
+          ? 'LIVE +15m'
+          : 'LIVE (SYNC 15m)'
+    badgeHl.textContent = `HL: ${hlStatusLabel}${health.hyperliquid.latencyMs ? ` ${health.hyperliquid.latencyMs}ms` : ''}`
+    badgeHl.className = `badge ${health.hyperliquid.status === 'live' && !anySyntheticHl ? 'ok' : 'warn'}`
 
     badgePm.textContent = `PM: ${health.polymarket.status.toUpperCase()}${health.polymarket.clobVerified ? ' +CLOB' : ''}`
     badgePm.className = `badge ${health.polymarket.status === 'live' ? 'ok' : 'warn'}`
@@ -534,21 +541,30 @@ export function mountCompanionPanel(
         ? `@${health.telegram.botUsername ?? 'Bot'} Live`
         : 'Coin-Locked Desk Bridge'
 
-    // Watched Public Hyperliquid Wallet metrics & positions
+    // Watched Public Hyperliquid Wallet metrics & positions — lead with Nearest Liquidation Distance!
     if (!walletInput.value) {
       walletInput.value = watchedWallet.address
     }
-    const wPnlSign = watchedWallet.totalUnrealizedPnlUsd >= 0 ? '+' : ''
+    const nearestPos = watchedWallet.positions[0]
+    const nearestLiqText = nearestPos
+      ? nearestPos.liqDistancePct !== null
+        ? `${nearestPos.coin} ${nearestPos.liqDistancePct > 99 ? '>99%' : `${nearestPos.liqDistancePct.toFixed(1)}%`}`
+        : `${nearestPos.coin} SAFE`
+      : 'None'
+    const nearestDanger =
+      nearestPos?.liqDistancePct !== null &&
+      nearestPos?.liqDistancePct !== undefined &&
+      nearestPos.liqDistancePct < 15
     walletMetricsEl.innerHTML = `
-      <div class="metric-card"><span>Acct Value</span><strong>$${Math.round(watchedWallet.accountValueUsd).toLocaleString('en-US')}</strong></div>
+      <div class="metric-card"><span>Nearest Liq</span><strong class="${nearestDanger ? 'neg' : 'pos'}">${escapeHtml(nearestLiqText)}</strong></div>
       <div class="metric-card"><span>Margin Ratio</span><strong class="${watchedWallet.marginRatioPct >= 65 ? 'neg' : 'pos'}">${watchedWallet.marginRatioPct.toFixed(1)}%</strong></div>
-      <div class="metric-card"><span>Live uPnL</span><strong class="${watchedWallet.totalUnrealizedPnlUsd >= 0 ? 'pos' : 'neg'}">${wPnlSign}$${Math.round(watchedWallet.totalUnrealizedPnlUsd).toLocaleString('en-US')}</strong></div>
+      <div class="metric-card"><span>Acct Value</span><strong>$${Math.round(watchedWallet.accountValueUsd).toLocaleString('en-US')}</strong></div>
     `
     walletPositionsEl.innerHTML =
       watchedWallet.positions.length === 0
         ? `<div class="muted">${escapeHtml(watchedWallet.error ?? 'No open perp positions on this public address.')}</div>`
         : watchedWallet.positions
-            .slice(0, 4)
+            .slice(0, 12)
             .map((p) => {
               const s = p.unrealizedPnlUsd >= 0 ? '+' : ''
               const liqText =
@@ -557,14 +573,14 @@ export function mountCompanionPanel(
                     ? '>99%'
                     : `${p.liqDistancePct.toFixed(1)}%`
                   : 'SAFE'
-              const liqDanger = p.liqDistancePct !== null && p.liqDistancePct < 10
+              const liqDanger = p.liqDistancePct !== null && p.liqDistancePct < 15
               return `
           <div class="list-row">
             <div class="row-top">
               <strong>${escapeHtml(p.coin)} · ${p.side} ${p.leverage}x</strong>
-              <span class="${p.unrealizedPnlUsd >= 0 ? 'pos' : 'neg'}">${s}$${Math.round(p.unrealizedPnlUsd).toLocaleString('en-US')}</span>
+              <span class="${liqDanger ? 'neg' : 'pos'}">Liq ${liqText}</span>
             </div>
-            <div class="muted">Entry $${p.entryPx.toLocaleString('en-US', { maximumFractionDigits: 2 })} · Mark $${p.markPx.toLocaleString('en-US', { maximumFractionDigits: 2 })} · <span class="${liqDanger ? 'neg' : 'pos'}">Liq Dist ${liqText}</span></div>
+            <div class="muted">uPnL <span class="${p.unrealizedPnlUsd >= 0 ? 'pos' : 'neg'}">${s}$${Math.round(p.unrealizedPnlUsd).toLocaleString('en-US')}</span> · Entry $${p.entryPx.toLocaleString('en-US', { maximumFractionDigits: 2 })} · Mark $${p.markPx.toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
           </div>`
             })
             .join('')
@@ -589,7 +605,7 @@ export function mountCompanionPanel(
     const uSign = portfolio.unrealizedPnlUsd >= 0 ? '+' : ''
     const rSign = portfolio.realizedPnlUsd >= 0 ? '+' : ''
     metricsEl.innerHTML = `
-      <div class="metric-card"><span>Paper Equity</span><strong>$${portfolio.equityUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></div>
+      <div class="metric-card"><span>Demo Paper Equity</span><strong>$${portfolio.equityUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></div>
       <div class="metric-card"><span>Unrealized PnL</span><strong class="${portfolio.unrealizedPnlUsd >= 0 ? 'pos' : 'neg'}">${uSign}$${portfolio.unrealizedPnlUsd.toFixed(2)}</strong></div>
       <div class="metric-card"><span>Realized PnL</span><strong class="${portfolio.realizedPnlUsd >= 0 ? 'pos' : 'neg'}">${rSign}$${portfolio.realizedPnlUsd.toFixed(2)}</strong></div>
     `
@@ -621,7 +637,7 @@ export function mountCompanionPanel(
 
     receiptsList.innerHTML =
       portfolio.receipts.length === 0
-        ? '<div class="muted">Tap any signal on the G2 glasses and hold through the 2.0s undo countdown to see verified receipts here.</div>'
+        ? '<div class="muted">Stage an action on the G2 lens, tap to arm the 2.0s undo ring, and let the timer finish to log a receipt here.</div>'
         : portfolio.receipts
             .slice(0, 6)
             .map(

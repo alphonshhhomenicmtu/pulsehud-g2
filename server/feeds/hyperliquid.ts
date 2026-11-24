@@ -266,6 +266,7 @@ export async function fetchLiveHyperliquidSignals(): Promise<{
       bestAsk: null,
       spreadBps: null,
       candles15m: [],
+      candlesSource: 'unavailable',
       alertTag: classifyHyperliquidAlert(change24hPct, fundingAprPct, volume24hUsd),
       updatedAt: now,
     })
@@ -294,9 +295,9 @@ export async function fetchLiveHyperliquidSignals(): Promise<{
 
   const topFive = selected.slice(0, 5)
 
-  // Concurrently enrich L2 top-of-book spreads AND live 15m OHLC candles
+  // Concurrently enrich L2 top-of-book spreads AND live 15m OHLC candles for every rendered coin
   const [l2Results, candleResults] = await Promise.all([
-    Promise.all(topFive.slice(0, 4).map((item) => fetchTopOfBook(item.coin))),
+    Promise.all(topFive.map((item) => fetchTopOfBook(item.coin))),
     Promise.all(topFive.map((item) => fetchCandles15m(item.coin, 24))),
   ])
 
@@ -304,18 +305,17 @@ export async function fetchLiveHyperliquidSignals(): Promise<{
   for (let i = 0; i < topFive.length; i += 1) {
     const l2 = l2Results[i] ?? { bestBid: null, bestAsk: null, spreadBps: null }
     const rawCandles = candleResults[i] ?? []
-    if (rawCandles.length >= 6) {
+    const hasLiveCandles = rawCandles.length >= 6
+    if (hasLiveCandles) {
       candlesLoaded = true
     }
-    const candles15m =
-      rawCandles.length >= 6
-        ? rawCandles
-        : synthesizeFallbackCandles(topFive[i].markPx, topFive[i].prevDayPx, 24, now)
 
+    // Never fabricate synthetic candles under a LIVE feed; leave empty so HUD shows SYNC honestly.
     topFive[i] = {
       ...topFive[i],
       ...l2,
-      candles15m,
+      candles15m: hasLiveCandles ? rawCandles : [],
+      candlesSource: hasLiveCandles ? 'live' : 'unavailable',
     }
   }
 
@@ -395,15 +395,11 @@ export function parseClearinghouseState(
     })
   }
 
-  // Prioritize majors and largest live notional exposure
-  const majorRank = (coin: string) => {
-    const idx = FEATURED_COINS.indexOf(coin)
-    return idx >= 0 ? idx : 99
-  }
+  // Lead with nearest liquidation risk (smallest liqDistancePct first, null last)
   positions.sort((a, b) => {
-    const aMajor = majorRank(a.coin) < 99 ? 1 : 0
-    const bMajor = majorRank(b.coin) < 99 ? 1 : 0
-    if (aMajor !== bMajor) return bMajor - aMajor
+    const aLiq = a.liqDistancePct ?? Number.POSITIVE_INFINITY
+    const bLiq = b.liqDistancePct ?? Number.POSITIVE_INFINITY
+    if (aLiq !== bLiq) return aLiq - bLiq
     return b.positionValueUsd - a.positionValueUsd
   })
 

@@ -44,6 +44,8 @@ export const MENU_IDS = {
 
 export type HudScreenKind = 'feed' | 'actions' | 'confirm' | 'voice' | 'wallet' | 'portfolio'
 
+export type ConfirmPhase = 'idle' | 'armed' | 'committing' | 'done'
+
 export type HudLayoutKey =
   | 'feed-chart'
   | 'feed-text'
@@ -66,6 +68,7 @@ export interface HudRenderModel {
   actionIndex: number
   stagedAction: StagedAction | null
   confirmSelection: 'confirm' | 'cancel'
+  confirmPhase: ConfirmPhase
   confirmArmed: boolean
   confirmRemainingMs: number
   confirmTotalMs: number
@@ -200,7 +203,7 @@ function formatHyperliquidChartHeader(
   const arrow = signal.change24hPct >= 0 ? '▲' : '▼'
   const sign = signal.change24hPct >= 0 ? '+' : ''
   const fundSign = signal.fundingAprPct >= 0 ? '+' : ''
-  const spreadText = signal.spreadBps !== null ? `${signal.spreadBps.toFixed(1)}bps` : 'Live'
+  const spreadText = signal.spreadBps !== null ? `${signal.spreadBps.toFixed(1)}bps` : 'L2 --'
 
   const pos = portfolio.positions.find(
     (p) => p.venue === 'hyperliquid' && p.symbol === `${signal.coin}-PERP`,
@@ -270,21 +273,44 @@ function formatTelegramCard(signal: TelegramMessageSignal, innerPx: number, now:
 export function buildHudPage(model: HudRenderModel): BuiltHudPage {
   const menuObject = buildContextMenu()
   const now = model.state.serverTime || Date.now()
-  const liveTag = model.state.offlineReplay
-    ? 'REPLAY'
-    : model.state.health.hyperliquid.status === 'live' ||
-        model.state.health.polymarket.status === 'live'
-      ? 'LIVE'
-      : 'SYNC'
   const cardBorderW = model.borderlessOptics ? 0 : 1
   const cardBorderC = model.borderlessOptics ? 0 : 8
-  const cardPad = model.borderlessOptics ? 4 : 8
 
   if (model.screen === 'feed') {
     const active = model.signals[model.signalIndex]
+    let liveTag: string
+    if (active?.kind === 'hyperliquid') {
+      if (active.candlesSource === 'synthetic') {
+        liveTag = 'FALLBACK'
+      } else if (active.candlesSource === 'unavailable' || active.candles15m.length < 6) {
+        liveTag = 'SYNC'
+      } else if (model.state.offlineReplay) {
+        liveTag = 'REPLAY'
+      } else if (model.state.health.hyperliquid.status === 'live') {
+        liveTag = 'LIVE'
+      } else {
+        liveTag = 'FALLBACK'
+      }
+    } else if (active?.kind === 'polymarket') {
+      liveTag = model.state.offlineReplay
+        ? 'REPLAY'
+        : model.state.health.polymarket.status === 'live'
+          ? 'LIVE'
+          : 'FALLBACK'
+    } else {
+      liveTag = model.state.offlineReplay
+        ? 'REPLAY'
+        : model.state.health.hyperliquid.status === 'live' ||
+            model.state.health.polymarket.status === 'live'
+          ? 'LIVE'
+          : 'SYNC'
+    }
+
     const channelLabel =
       active?.kind === 'hyperliquid'
-        ? 'HYPERLIQUID 15M'
+        ? active.candlesSource === 'synthetic'
+          ? 'HL 15M FALLBACK'
+          : 'HYPERLIQUID 15M'
         : active?.kind === 'polymarket'
           ? 'POLYMARKET CLOB'
           : active?.kind === 'telegram'
@@ -299,15 +325,23 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
     const pnl = model.state.portfolio.unrealizedPnlUsd
     const pnlSign = pnl >= 0 ? '+' : ''
     const w = model.state.watchedWallet
+    const nearestWatched = w.positions[0]
+    const nearestLiqStr = nearestWatched
+      ? nearestWatched.liqDistancePct !== null
+        ? nearestWatched.liqDistancePct > 99
+          ? '>99%'
+          : `${nearestWatched.liqDistancePct.toFixed(1)}%`
+        : 'SAFE'
+      : null
     const watchSummary =
-      w.positions.length > 0
-        ? `Watch ${w.marginRatioPct.toFixed(0)}%M`
+      nearestWatched && nearestLiqStr
+        ? `Liq ${nearestWatched.coin} ${nearestLiqStr}`
         : `TG Unread: ${model.state.health.telegram.unreadCount}`
 
     const metaContent = model.toast
       ? fitSingleLine(`★ ${model.toast}`, 552)
       : fitSingleLine(
-          `Paper $${model.state.portfolio.equityUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} (${pnlSign}$${pnl.toFixed(1)}) · ${watchSummary} · TG:${model.state.health.telegram.unreadCount}`,
+          `DEMO Paper $${model.state.portfolio.equityUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} (${pnlSign}$${pnl.toFixed(1)}) · ${watchSummary} · TG:${model.state.health.telegram.unreadCount}`,
           552,
         )
 
@@ -565,29 +599,36 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
 
   if (model.screen === 'confirm') {
     const staged = model.stagedAction
+    const isCommitting = model.confirmPhase === 'committing'
+    const isArmed = !isCommitting && (model.confirmPhase === 'armed' || model.confirmArmed)
     const ringSlot = renderUndoCountdownRing(
-      model.confirmRemainingMs,
+      isCommitting ? 0 : model.confirmRemainingMs,
       model.confirmTotalMs,
-      model.confirmArmed,
+      isArmed,
+      isCommitting,
     )
 
     const remSecs = (Math.max(0, model.confirmRemainingMs) / 1000).toFixed(1)
-    const hdrContent = model.confirmArmed
-      ? fitSingleLine(`▲ ARMED · EXECUTING IN ${remSecs}s · TAP TO UNDO!`, 556)
-      : fitSingleLine(
-          `▲ CONFIRM WRITE · ${staged?.source === 'voice' ? 'VOICE STAGED' : '2.0s UNDO GATE'}`,
-          556,
-        )
+    const hdrContent = isCommitting
+      ? fitSingleLine('▲ SENDING · COMMITTING ACTION (INPUT LOCKED)', 556)
+      : isArmed
+        ? fitSingleLine(`▲ ARMED · EXECUTING IN ${remSecs}s · TAP TO UNDO!`, 556)
+        : fitSingleLine(
+            `▲ CONFIRM WRITE · ${staged?.source === 'voice' ? 'VOICE STAGED' : '2.0s UNDO GATE'}`,
+            556,
+          )
 
     const summaryLines = staged ? wrapToLines(staged.summary, 444, 2) : ['No action staged.']
     let ctaLine = ''
-    if (model.confirmArmed) {
+    if (isCommitting) {
+      ctaLine = '● COMMITTING WRITE · DUPLICATE TAPS LOCKED'
+    } else if (isArmed) {
       const ratio = model.confirmRemainingMs / Math.max(1, model.confirmTotalMs)
       ctaLine = `◀ TAP NOW TO UNDO [${renderProgressBar(ratio, 8)} ${remSecs}s]`
     } else if (model.confirmSelection === 'confirm') {
-      ctaLine = '▶ ARM & EXECUTE [TAP]   ○ Cancel'
+      ctaLine = '▶ ARM 2.0s UNDO [TAP]   ○ Cancel'
     } else {
-      ctaLine = '○ Arm   ▶ CANCEL & BACK [TAP]'
+      ctaLine = '○ Arm 2.0s   ▶ CANCEL & BACK [TAP]'
     }
 
     const gateLines = [
@@ -596,16 +637,20 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
       fitSingleLine(ctaLine, 444),
     ]
 
-    const riskContent = model.confirmArmed
-      ? fitSingleLine('SAFETY WINDOW · Single tap or 2xTap cancels (0 writes)', 548)
-      : fitSingleLine(
-          staged?.riskNote ?? 'PAPER MODE ONLY · Tap arms 2.0s undo countdown.',
-          548,
-        )
+    const riskContent = isCommitting
+      ? fitSingleLine('IN-FLIGHT WRITE · Waiting for receipt (taps locked)', 548)
+      : isArmed
+        ? fitSingleLine('SAFETY WINDOW · Single tap or 2xTap cancels (0 writes)', 548)
+        : fitSingleLine(
+            staged?.riskNote ?? 'PAPER MODE ONLY · Tap arms 2.0s undo countdown.',
+            548,
+          )
 
-    const footContent = model.confirmArmed
-      ? fitSingleLine('● Tap: UNDO NOW   ◀ 2xTap: UNDO   (Wait 2s to Send)', 552)
-      : fitSingleLine('● Tap: Arm 2s Undo   ↕ Swipe: Toggle   ◀ 2xTap: Cancel', 552)
+    const footContent = isCommitting
+      ? fitSingleLine('Sending...   (Inputs locked until receipt returns)', 552)
+      : isArmed
+        ? fitSingleLine('● Tap: UNDO NOW   ◀ 2xTap: UNDO   (Wait 2s to Send)', 552)
+        : fitSingleLine('● Tap: Arm 2s Undo   ↕ Swipe: Toggle   ◀ 2xTap: Cancel', 552)
 
     return {
       layoutKey: 'confirm',
@@ -624,7 +669,7 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
           borderRadius: 0,
           paddingLength: 2,
           content: clampBytes(hdrContent),
-          textColor: model.confirmArmed ? 4 : 3,
+          textColor: isArmed || isCommitting ? 4 : 3,
           isEventCapture: 0,
         },
         {
@@ -635,7 +680,7 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
           width: 472,
           height: 150,
           borderWidth: 2,
-          borderColor: model.confirmArmed ? 15 : 12,
+          borderColor: isArmed || isCommitting ? 15 : 12,
           borderRadius: 8,
           paddingLength: 10,
           content: clampBytes(gateLines.slice(0, 4).join('\n')),
@@ -654,7 +699,7 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
           borderRadius: 0,
           paddingLength: 4,
           content: clampBytes(riskContent),
-          textColor: model.confirmArmed ? 4 : 2,
+          textColor: isArmed || isCommitting ? 4 : 2,
           isEventCapture: 0,
         },
         {
@@ -762,22 +807,22 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
       556,
     )
 
-    const summaryLines: string[] = [
-      fitSingleLine(
-        `Acct ${formatCompactUsd(w.accountValueUsd)} · Margin ${w.marginRatioPct.toFixed(1)}% · uPnL ${uSign}${formatCompactUsd(w.totalUnrealizedPnlUsd)}`,
-        548,
-      ),
-    ]
-
+    const summaryLines: string[] = []
     if (w.positions.length === 0) {
       summaryLines.push(
+        fitSingleLine(
+          `Acct ${formatCompactUsd(w.accountValueUsd)} · Margin ${w.marginRatioPct.toFixed(1)}% · uPnL ${uSign}${formatCompactUsd(w.totalUnrealizedPnlUsd)}`,
+          548,
+        ),
         fitSingleLine(
           w.error ? `Notice: ${w.error}` : 'No open perp positions on this public address.',
           548,
         ),
       )
     } else {
-      for (const p of w.positions.slice(0, 2)) {
+      // Row 1 leads directly with nearest liquidation distance (smallest liqDistancePct first)
+      const topTwo = w.positions.slice(0, 2)
+      topTwo.forEach((p, idx) => {
         const ps = p.unrealizedPnlUsd >= 0 ? '+' : ''
         const liqStr =
           p.liqDistancePct !== null
@@ -785,22 +830,29 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
               ? '>99%'
               : `${p.liqDistancePct.toFixed(1)}%`
             : 'SAFE'
+        const prefix = idx === 0 ? '▶ NEAREST LIQ' : '○ NEXT RISK'
         summaryLines.push(
           fitSingleLine(
-            `▶ ${p.coin} ${p.side} ${p.leverage}x · uPnL ${ps}${formatCompactUsd(p.unrealizedPnlUsd)} · Liq ${liqStr}`,
+            `${prefix}: ${p.coin} ${p.side} ${p.leverage}x · Liq ${liqStr} · ${ps}${formatCompactUsd(p.unrealizedPnlUsd)}`,
             548,
           ),
         )
-      }
+      })
+      summaryLines.push(
+        fitSingleLine(
+          `Acct ${formatCompactUsd(w.accountValueUsd)} · Margin ${w.marginRatioPct.toFixed(1)}% · uPnL ${uSign}${formatCompactUsd(w.totalUnrealizedPnlUsd)}`,
+          548,
+        ),
+      )
     }
 
     const riskTiles = renderWalletRiskBarTiles(w)
     const metaContent = model.toast
       ? fitSingleLine(`★ ${model.toast}`, 552)
-      : fitSingleLine(`${w.label} · ${w.positions.length} active perps · Zero Custody`, 552)
+      : fitSingleLine(`${w.label} · ${w.positions.length} active perps · Sorted by Nearest Liq`, 552)
 
     const footContent = fitSingleLine(
-      '● Tap: Hedge Top Coin   ↕ Swipe: Feed   ≡ Menu',
+      '● Tap: Hedge Nearest Liq   ↕ Swipe: Feed   ≡ Menu',
       552,
     )
 
@@ -877,7 +929,7 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
   const portfolio = model.state.portfolio
   const uSign = portfolio.unrealizedPnlUsd >= 0 ? '+' : ''
   const rSign = portfolio.realizedPnlUsd >= 0 ? '+' : ''
-  const hdrContent = fitSingleLine('● PAPER PORTFOLIO · LIVE MARK-TO-MARKET', 556)
+  const hdrContent = fitSingleLine('● DEMO PAPER BOOK · LIVE MARK-TO-MARKET', 556)
 
   const posLines: string[] = [
     fitSingleLine(

@@ -64,8 +64,6 @@ export class BrowserDirectEngine {
   public async init(): Promise<PulseStateSnapshot> {
     if (!this.initialized) {
       this.initialized = true
-      this.ledger.seedIfEmpty(this.hlSignals, this.pmSignals)
-      this.telegram.seedDeskMessages(this.hlSignals, this.pmSignals)
       await this.refresh()
       if (typeof window !== 'undefined' && this.pollTimer === null) {
         this.pollTimer = window.setInterval(() => {

@@ -14,6 +14,7 @@ import { PaperLedger } from '../server/engine/paperLedger.js'
 import { detectMentionedCoin, TelegramBridge } from '../server/telegram/bridge.js'
 import { parseVoiceIntent } from '../server/voice/intent.js'
 import type { PulseStateSnapshot, StagedAction } from '../shared/types.js'
+import { GlassesAudioCapture, renderVoiceMeter } from '../src/hud/audio.js'
 import {
   encodeGray8ToPng,
   renderHyperliquidCandlesTiles,
@@ -176,13 +177,66 @@ describe('V2 Champion Upgrade: Graphics Rasterizer, clearinghouseState, Coin-Loc
     expect(parsed.totalUnrealizedPnlUsd).toBe(2500)
     expect(parsed.positions).toHaveLength(2)
 
-    const btc = parsed.positions.find((p) => p.coin === 'BTC')!
-    expect(btc.side).toBe('LONG')
-    expect(btc.liqDistancePct).toBeCloseTo(10, 1) // (60000 - 54000) / 60000 = 10%
+    // Sorted by nearest liquidation distance ascending (BTC 10% before ETH 15%)
+    expect(parsed.positions[0].coin).toBe('BTC')
+    expect(parsed.positions[0].side).toBe('LONG')
+    expect(parsed.positions[0].liqDistancePct).toBeCloseTo(10, 1) // (60000 - 54000) / 60000 = 10%
 
-    const eth = parsed.positions.find((p) => p.coin === 'ETH')!
-    expect(eth.side).toBe('SHORT')
-    expect(eth.liqDistancePct).toBeCloseTo(15, 1) // (2300 - 2000) / 2000 = 15%
+    expect(parsed.positions[1].coin).toBe('ETH')
+    expect(parsed.positions[1].side).toBe('SHORT')
+    expect(parsed.positions[1].liqDistancePct).toBeCloseTo(15, 1) // (2300 - 2000) / 2000 = 15%
+
+    // Verify altcoin with closer liquidation leads ahead of larger BTC notional, and null liq goes last
+    const altSorted = parseClearinghouseState(
+      DEFAULT_WATCHED_HL_ADDRESS,
+      'Nearest Risk Check',
+      {
+        marginSummary: { accountValue: '500000', totalMarginUsed: '200000' },
+        assetPositions: [
+          {
+            position: {
+              coin: 'BTC',
+              szi: '10',
+              leverage: { type: 'cross', value: 5 },
+              entryPx: '60000',
+              positionValue: '600000',
+              unrealizedPnl: '2000',
+              liquidationPx: '45000', // 25% away
+            },
+          },
+          {
+            position: {
+              coin: 'DOGE',
+              szi: '50000',
+              leverage: { type: 'isolated', value: 20 },
+              entryPx: '0.20',
+              positionValue: '10000',
+              unrealizedPnl: '-400',
+              liquidationPx: '0.193', // 3.5% away -> MUST lead!
+            },
+          },
+          {
+            position: {
+              coin: 'ETH',
+              szi: '5',
+              leverage: { type: 'cross', value: 2 },
+              entryPx: '2000',
+              positionValue: '10000',
+              unrealizedPnl: '100',
+              liquidationPx: null, // null -> MUST sort last!
+            },
+          },
+        ],
+      },
+      new Map([
+        ['BTC', 60000],
+        ['DOGE', 0.2],
+        ['ETH', 2000],
+      ]),
+    )
+    expect(altSorted.positions.map((p) => p.coin)).toEqual(['DOGE', 'BTC', 'ETH'])
+    expect(altSorted.positions[0].liqDistancePct).toBeCloseTo(3.5, 1)
+    expect(altSorted.positions[2].liqDistancePct).toBeNull()
   })
 
   it('supports 50% Partial Close and Move Stop to Break-Even in PaperLedger', () => {
@@ -324,7 +378,122 @@ describe('V2 Champion Upgrade: Graphics Rasterizer, clearinghouseState, Coin-Loc
     await vi.advanceTimersByTimeAsync(2050)
     expect(executed).toHaveLength(1)
     expect(executed[0].type).toBe('hl_paper_short')
+    expect(ctrl.getRenderModel().confirmPhase).toBe('done')
     ctrl.destroy()
+  })
+
+  it('prevents a tap at 0.0s from ever re-arming or double-sending an in-flight commit (explicit committing phase)', async () => {
+    vi.useFakeTimers()
+    const state = makeState()
+    const executed: StagedAction[] = []
+
+    let resolveInFlight!: (res: {
+      ok: true
+      receipt: {
+        id: string
+        timestamp: number
+        type: StagedAction['type']
+        title: string
+        detail: string
+        venue: 'hyperliquid-paper'
+        deliveredExternal: false
+      }
+      toast: string
+      state: PulseStateSnapshot
+    }) => void
+
+    const ctrl = new PulseHudController(null, state, {
+      undoWindowMs: 2000,
+      executeActionFn: (action) => {
+        executed.push(action)
+        return new Promise((resolve) => {
+          resolveInFlight = resolve
+        })
+      },
+    })
+
+    // Stage Paper Short BTC -> Confirm Gate -> Arm 2.0s undo ring
+    await ctrl.dispatchGesture({ kind: 'click' })
+    await ctrl.dispatchGesture({ kind: 'click' })
+    expect(ctrl.getRenderModel().screen).toBe('confirm')
+    expect(ctrl.getRenderModel().confirmPhase).toBe('idle')
+
+    await ctrl.dispatchGesture({ kind: 'click' })
+    expect(ctrl.getRenderModel().confirmPhase).toBe('armed')
+
+    // Expire the 2.0s timer so commitStagedAction starts and enters 'committing' before awaiting executeActionFn
+    vi.advanceTimersByTime(2000)
+    expect(ctrl.getRenderModel().confirmPhase).toBe('committing')
+    expect(ctrl.getRenderModel().confirmArmed).toBe(false)
+    expect(executed).toHaveLength(1)
+
+    // Hammer click, double-click, scroll, long-press, and menu at 0.0s while executeActionFn is still pending!
+    await ctrl.dispatchGesture({ kind: 'click' })
+    await ctrl.dispatchGesture({ kind: 'double_click' })
+    await ctrl.dispatchGesture({ kind: 'scroll_down' })
+    await ctrl.dispatchGesture({ kind: 'long_press' })
+    await ctrl.handleMenuSelection(MENU_IDS.PORTFOLIO)
+
+    // Still locked in 'committing', NEVER re-armed, NEVER navigated away, still exactly 1 call!
+    expect(ctrl.getRenderModel().confirmPhase).toBe('committing')
+    expect(ctrl.getRenderModel().confirmArmed).toBe(false)
+    expect(ctrl.getRenderModel().screen).toBe('confirm')
+    expect(executed).toHaveLength(1)
+
+    // Even if the network request stalls for > 3.0s (> undoWindowMs), no re-armed timer fires!
+    vi.advanceTimersByTime(3500)
+    expect(executed).toHaveLength(1)
+    expect(ctrl.getRenderModel().confirmPhase).toBe('committing')
+
+    // Settle the single in-flight commit
+    resolveInFlight({
+      ok: true,
+      receipt: {
+        id: 'rcpt-single',
+        timestamp: Date.now(),
+        type: executed[0].type,
+        title: 'SINGLE COMMIT',
+        detail: executed[0].summary,
+        venue: 'hyperliquid-paper',
+        deliveredExternal: false,
+      },
+      toast: 'SINGLE COMMIT OK',
+      state,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(executed).toHaveLength(1)
+    expect(ctrl.getRenderModel().confirmPhase).toBe('done')
+    expect(ctrl.getRenderModel().screen).toBe('feed')
+    expect(ctrl.getRenderModel().toast).toBe('SINGLE COMMIT OK')
+    ctrl.destroy()
+  })
+
+  it('copies PCM frames defensively and renders voice meter with firmware-verified glyphs only', () => {
+    const capture = new GlassesAudioCapture()
+    capture.start()
+
+    // Simulate a host bridge reusing the same Uint8Array buffer across consecutive audioEvents
+    const sharedBuf = new Uint8Array(64)
+    sharedBuf.fill(0x11)
+    capture.pushPcm(sharedBuf)
+    sharedBuf.fill(0x22)
+    capture.pushPcm(sharedBuf)
+
+    const out = capture.stopAndEncodeBase64()
+    const decoded = Buffer.from(out.base64, 'base64')
+    expect(decoded.length).toBe(128)
+    expect(decoded[0]).toBe(0x11)
+    expect(decoded[63]).toBe(0x11)
+    expect(decoded[64]).toBe(0x22)
+    expect(decoded[127]).toBe(0x22)
+
+    // Voice meter uses strictly ━ / ─ (zero U+2581..U+2588 block characters)
+    for (let tick = 0; tick < 8; tick += 1) {
+      const meter = renderVoiceMeter(0.5, tick)
+      expect(meter).toMatch(/^[━─]{8}$/)
+    }
   })
 
   it('passes 30-phrase Voice Intent Evaluation Suite with zero false executions on non-trading chatter', () => {

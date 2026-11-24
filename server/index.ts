@@ -220,7 +220,7 @@ await hub.start()
 server.listen(PORT, '127.0.0.1', () => {
   const snap = hub.getSnapshot()
   console.log(
-    `[PulseHUD Server v2] Listening on http://127.0.0.1:${PORT} | HL=${snap.health.hyperliquid.status} (${snap.hyperliquid.length}, candles=${snap.health.hyperliquid.candlesLoaded}) | PM=${snap.health.polymarket.status} (${snap.polymarket.length}, clob=${snap.health.polymarket.clobVerified}) | WATCH=${snap.watchedWallet.status} (${snap.watchedWallet.positions.length} pos) | TG=${snap.health.telegram.mode} (${snap.telegram.length})`,
+    `[PulseHUD Server v2.1] Listening on http://127.0.0.1:${PORT} | HL=${snap.health.hyperliquid.status} (${snap.hyperliquid.length}, candles=${snap.health.hyperliquid.candlesLoaded}) | PM=${snap.health.polymarket.status} (${snap.polymarket.length}, clob=${snap.health.polymarket.clobVerified}) | WATCH=${snap.watchedWallet.status} (${snap.watchedWallet.positions.length} pos) | TG=${snap.health.telegram.mode} (${snap.telegram.length})`,
   )
 })
 

@@ -216,6 +216,7 @@ export async function fetchLivePolymarketSignals(): Promise<{
         change24hCents,
         volume24hUsd: vol24h,
         sparkline24h: buildPolymarketSparkline(yes, change24hCents),
+        sparklineSource: 'synthetic',
         alertTag: classifyPolymarketAlert(change24hCents, vol24h),
         updatedAt: now,
       }
@@ -241,10 +242,11 @@ export async function fetchLivePolymarketSignals(): Promise<{
   for (let i = 0; i < clobDetails.length; i += 1) {
     const detail = clobDetails[i]
     const nextYes = detail.clobMidpoint ?? topFive[i].yesPrice
-    const sparkline24h =
-      detail.historyPoints.length >= 6
-        ? detail.historyPoints
-        : buildPolymarketSparkline(nextYes, topFive[i].change24hCents)
+    const hasLiveHistory = detail.historyPoints.length >= 6
+    const sparkline24h = hasLiveHistory
+      ? detail.historyPoints
+      : buildPolymarketSparkline(nextYes, topFive[i].change24hCents)
+    const sparklineSource: 'live' | 'synthetic' = hasLiveHistory ? 'live' : 'synthetic'
 
     if (detail.clobMidpoint !== null) {
       clobVerified = true
@@ -257,6 +259,7 @@ export async function fetchLivePolymarketSignals(): Promise<{
         bestAsk: detail.bestAsk,
         spreadCents: detail.spreadCents,
         sparkline24h,
+        sparklineSource,
       }
     } else {
       topFive[i] = {
@@ -266,6 +269,7 @@ export async function fetchLivePolymarketSignals(): Promise<{
         bestAsk: detail.bestAsk,
         spreadCents: detail.spreadCents,
         sparkline24h,
+        sparklineSource,
       }
     }
   }

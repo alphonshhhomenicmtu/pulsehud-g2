@@ -88,6 +88,7 @@ describe('Even G2 576x288 HUD layout & SDK v0.0.16 container + image compliance'
           source: 'tap',
         },
         confirmSelection: 'confirm',
+        confirmPhase: screen === 'confirm' ? 'armed' : 'idle',
         confirmArmed: screen === 'confirm',
         confirmRemainingMs: 1400,
         confirmTotalMs: 2000,
@@ -157,6 +158,7 @@ describe('Even G2 576x288 HUD layout & SDK v0.0.16 container + image compliance'
       actionIndex: 0,
       stagedAction: null,
       confirmSelection: 'confirm',
+      confirmPhase: 'idle',
       confirmArmed: false,
       confirmRemainingMs: 2000,
       confirmTotalMs: 2000,
@@ -173,5 +175,102 @@ describe('Even G2 576x288 HUD layout & SDK v0.0.16 container + image compliance'
     expect(hlPage.imageSlots.length).toBe(2)
     expect(hlPage.imageSlots[0].width).toBe(276)
     expect(hlPage.imageSlots[1].width).toBe(276)
+    // Fallback synthetic candles MUST NEVER be labeled LIVE
+    expect(hlPage.slots[0].content).toContain('FALLBACK')
+    expect(hlPage.slots[0].content).not.toContain('· LIVE')
+  })
+
+  it('labels live Hyperliquid candles LIVE, synthetic fallback FALLBACK, and missing candles SYNC', () => {
+    const baseModel = {
+      screen: 'feed' as const,
+      channel: 'hyperliquid' as const,
+      borderlessOptics: true,
+      hlOrderSizeUsd: 1000,
+      pmStakeSizeUsd: 50,
+      state,
+      signalIndex: 0,
+      actions: [],
+      actionIndex: 0,
+      stagedAction: null,
+      confirmSelection: 'confirm' as const,
+      confirmPhase: 'idle' as const,
+      confirmArmed: false,
+      confirmRemainingMs: 2000,
+      confirmTotalMs: 2000,
+      voiceActive: false,
+      voiceStatusLine: '',
+      voiceDurationMs: 0,
+      voiceLevel: 0,
+      voiceTick: 0,
+      toast: null,
+    }
+
+    // 1. Live candles -> LIVE
+    const liveSignal = { ...state.hyperliquid[0], candlesSource: 'live' as const }
+    const livePage = buildHudPage({ ...baseModel, signals: [liveSignal] })
+    expect(livePage.slots[0].content).toContain('LIVE')
+    expect(livePage.imageSlots[0].fingerprint).toContain(':live:')
+
+    // 2. Synthetic fallback candles -> FALLBACK (never LIVE)
+    const synthSignal = { ...state.hyperliquid[0], candlesSource: 'synthetic' as const }
+    const synthPage = buildHudPage({ ...baseModel, signals: [synthSignal] })
+    expect(synthPage.slots[0].content).toContain('FALLBACK')
+    expect(synthPage.slots[0].content).not.toContain('· LIVE')
+    expect(synthPage.imageSlots[0].fingerprint).toContain(':synthetic:')
+
+    // 3. Unavailable / <6 candles -> SYNC tile (never LIVE)
+    const syncSignal = { ...state.hyperliquid[0], candles15m: [], candlesSource: 'unavailable' as const }
+    const syncPage = buildHudPage({ ...baseModel, signals: [syncSignal] })
+    expect(syncPage.slots[0].content).toContain('SYNC')
+    expect(syncPage.slots[0].content).not.toContain('· LIVE')
+    expect(syncPage.imageSlots[0].fingerprint).toContain('hl-sync:')
+  })
+
+  it('leads the wallet lens with nearest liquidation distance, marks portfolio DEMO, and validates committing confirm state', () => {
+    const baseModel = {
+      channel: 'all' as const,
+      borderlessOptics: true,
+      hlOrderSizeUsd: 1000,
+      pmStakeSizeUsd: 50,
+      state,
+      signals: state.hyperliquid,
+      signalIndex: 0,
+      actions: [],
+      actionIndex: 0,
+      stagedAction: {
+        id: 'c1',
+        type: 'hl_paper_short' as const,
+        label: 'Paper Short $1,000 BTC',
+        headline: 'HYPERLIQUID PAPER SHORT BTC',
+        summary: '$1,000 notional @ $61,579.00',
+        riskNote: 'PAPER MODE ONLY · 2.0s undo window.',
+        source: 'tap' as const,
+      },
+      confirmSelection: 'confirm' as const,
+      confirmPhase: 'committing' as const,
+      confirmArmed: false,
+      confirmRemainingMs: 0,
+      confirmTotalMs: 2000,
+      voiceActive: false,
+      voiceStatusLine: '',
+      voiceDurationMs: 0,
+      voiceLevel: 0,
+      voiceTick: 0,
+      toast: null,
+    }
+
+    const walletPage = buildHudPage({ ...baseModel, screen: 'wallet', confirmPhase: 'idle' })
+    const walletFirstLine = walletPage.slots[1].content.split('\n')[0]
+    expect(walletFirstLine).toContain('NEAREST LIQ')
+    expect(walletFirstLine).toContain('BTC')
+    expect(walletFirstLine).toContain('12.7%')
+
+    const portfolioPage = buildHudPage({ ...baseModel, screen: 'portfolio', confirmPhase: 'idle' })
+    expect(portfolioPage.slots[0].content).toContain('DEMO')
+
+    const committingPage = buildHudPage({ ...baseModel, screen: 'confirm', confirmPhase: 'committing' })
+    expect(committingPage.slots[0].content).toContain('SENDING')
+    expect(committingPage.imageSlots[0].fingerprint).toBe('ring:commit:-2')
+    expect(validateEvenHubPageContainer(toStartUpPageContainer(committingPage)).valid).toBe(true)
   })
 })
