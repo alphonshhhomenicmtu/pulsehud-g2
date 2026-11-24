@@ -5,12 +5,24 @@ import type {
   PolymarketOddsSignal,
   PulseStateSnapshot,
   StagedAction,
+  WatchedWalletSnapshot,
 } from '../../shared/types.js'
 import { PaperLedger } from '../engine/paperLedger.js'
 import { TelegramBridge, formatDigestText } from '../telegram/bridge.js'
 import { detectSttProvider } from '../voice/intent.js'
-import { createFallbackHyperliquidSignals, createFallbackPolymarketSignals } from './fallbackSnapshot.js'
-import { fetchLiveHyperliquidSignals } from './hyperliquid.js'
+import {
+  createFallbackHyperliquidSignals,
+  createFallbackPolymarketSignals,
+  createFallbackWatchedWallet,
+} from './fallbackSnapshot.js'
+import {
+  DEFAULT_WATCHED_HL_ADDRESS,
+  fetchLiveClearinghouseState,
+  fetchLiveHyperliquidSignals,
+  isValidEthAddress,
+  shortenAddress,
+  WATCHED_WALLET_PRESETS,
+} from './hyperliquid.js'
 import { fetchLivePolymarketSignals } from './polymarket.js'
 
 type Listener = (snapshot: PulseStateSnapshot) => void
@@ -18,6 +30,10 @@ type Listener = (snapshot: PulseStateSnapshot) => void
 export class MarketHub {
   private hlSignals: HyperliquidPerpSignal[] = createFallbackHyperliquidSignals()
   private pmSignals: PolymarketOddsSignal[] = createFallbackPolymarketSignals()
+  private markMap = new Map<string, number>()
+  private watchedAddress: string
+  private watchedLabel: string
+  private watchedWallet: WatchedWalletSnapshot = createFallbackWatchedWallet()
   private offlineReplay: boolean
   private ledger = new PaperLedger()
   private telegram: TelegramBridge
@@ -26,7 +42,7 @@ export class MarketHub {
   private refreshing = false
 
   private health: FeedHealth = {
-    hyperliquid: { status: 'replay', latencyMs: null, lastSyncAt: null },
+    hyperliquid: { status: 'replay', latencyMs: null, lastSyncAt: null, candlesLoaded: false },
     polymarket: { status: 'replay', latencyMs: null, lastSyncAt: null, clobVerified: false },
     telegram: {
       mode: 'desk_bridge',
@@ -40,6 +56,14 @@ export class MarketHub {
 
   constructor() {
     this.offlineReplay = process.env.OFFLINE_REPLAY === 'true'
+    const envAddr = process.env.WATCHED_HL_ADDRESS?.trim()
+    this.watchedAddress =
+      envAddr && isValidEthAddress(envAddr) ? envAddr : DEFAULT_WATCHED_HL_ADDRESS
+    const preset = WATCHED_WALLET_PRESETS.find(
+      (p) => p.address.toLowerCase() === this.watchedAddress.toLowerCase(),
+    )
+    this.watchedLabel = preset?.label ?? shortenAddress(this.watchedAddress)
+
     this.telegram = new TelegramBridge({
       botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
       chatId: process.env.TELEGRAM_CHAT_ID ?? '',
@@ -83,10 +107,56 @@ export class MarketHub {
     if (enabled) {
       this.health.hyperliquid.status = 'replay'
       this.health.polymarket.status = 'replay'
+      this.watchedWallet = createFallbackWatchedWallet()
       this.broadcast()
     } else {
       void this.refresh()
     }
+    return this.getSnapshot()
+  }
+
+  public async setWatchedWallet(address: string, label?: string): Promise<PulseStateSnapshot> {
+    const clean = address.trim()
+    if (!isValidEthAddress(clean)) {
+      throw new Error('Please enter a valid 42-character 0x Hyperliquid public address.')
+    }
+    this.watchedAddress = clean
+    const preset = WATCHED_WALLET_PRESETS.find(
+      (p) => p.address.toLowerCase() === clean.toLowerCase(),
+    )
+    this.watchedLabel = label?.trim() || preset?.label || shortenAddress(clean)
+
+    if (this.offlineReplay) {
+      this.watchedWallet = {
+        ...createFallbackWatchedWallet(),
+        address: this.watchedAddress,
+        label: this.watchedLabel,
+      }
+    } else {
+      try {
+        this.watchedWallet = await fetchLiveClearinghouseState(
+          this.watchedAddress,
+          this.watchedLabel,
+          this.markMap,
+        )
+      } catch (err) {
+        this.watchedWallet = {
+          address: this.watchedAddress,
+          label: this.watchedLabel,
+          status: 'error',
+          accountValueUsd: 0,
+          totalMarginUsedUsd: 0,
+          marginRatioPct: 0,
+          totalUnrealizedPnlUsd: 0,
+          withdrawableUsd: 0,
+          positions: [],
+          updatedAt: Date.now(),
+          error: err instanceof Error ? err.message : 'Failed to fetch clearinghouseState',
+        }
+      }
+    }
+
+    this.broadcast()
     return this.getSnapshot()
   }
 
@@ -98,6 +168,7 @@ export class MarketHub {
       if (this.offlineReplay) {
         this.health.hyperliquid.status = 'replay'
         this.health.polymarket.status = 'replay'
+        this.watchedWallet = createFallbackWatchedWallet()
       } else {
         const [hlRes, pmRes] = await Promise.allSettled([
           fetchLiveHyperliquidSignals(),
@@ -106,17 +177,23 @@ export class MarketHub {
 
         if (hlRes.status === 'fulfilled' && hlRes.value.signals.length > 0) {
           this.hlSignals = hlRes.value.signals
+          this.markMap = hlRes.value.markMap
           this.health.hyperliquid = {
             status: 'live',
             latencyMs: hlRes.value.latencyMs,
             lastSyncAt: Date.now(),
+            candlesLoaded: hlRes.value.candlesLoaded,
           }
         } else {
           this.health.hyperliquid = {
             status: 'replay',
             latencyMs: null,
             lastSyncAt: this.health.hyperliquid.lastSyncAt,
-            error: hlRes.status === 'rejected' ? String(hlRes.reason?.message ?? hlRes.reason) : 'Empty response',
+            candlesLoaded: false,
+            error:
+              hlRes.status === 'rejected'
+                ? String(hlRes.reason?.message ?? hlRes.reason)
+                : 'Empty response',
           }
         }
 
@@ -134,7 +211,27 @@ export class MarketHub {
             latencyMs: null,
             lastSyncAt: this.health.polymarket.lastSyncAt,
             clobVerified: false,
-            error: pmRes.status === 'rejected' ? String(pmRes.reason?.message ?? pmRes.reason) : 'Empty response',
+            error:
+              pmRes.status === 'rejected'
+                ? String(pmRes.reason?.message ?? pmRes.reason)
+                : 'Empty response',
+          }
+        }
+
+        try {
+          this.watchedWallet = await fetchLiveClearinghouseState(
+            this.watchedAddress,
+            this.watchedLabel,
+            this.markMap,
+          )
+        } catch (err) {
+          if (this.watchedWallet.status !== 'live') {
+            this.watchedWallet = {
+              ...createFallbackWatchedWallet(),
+              address: this.watchedAddress,
+              label: this.watchedLabel,
+              error: err instanceof Error ? err.message : 'clearinghouseState fallback',
+            }
           }
         }
       }
@@ -186,7 +283,13 @@ export class MarketHub {
   }
 
   public injectTelegramMessage(sender: string, chatName: string, text: string) {
-    const msg = this.telegram.injectInboundMessage(sender, chatName, text, this.hlSignals, this.pmSignals)
+    const msg = this.telegram.injectInboundMessage(
+      sender,
+      chatName,
+      text,
+      this.hlSignals,
+      this.pmSignals,
+    )
     this.health.telegram = this.telegram.getHealth()
     this.broadcast()
     return msg
@@ -205,9 +308,19 @@ export class MarketHub {
       serverTime: Date.now(),
       offlineReplay: this.offlineReplay,
       health: structuredClone(this.health),
-      hyperliquid: this.hlSignals.map((s) => ({ ...s })),
-      polymarket: this.pmSignals.map((s) => ({ ...s })),
+      hyperliquid: this.hlSignals.map((s) => ({
+        ...s,
+        candles15m: s.candles15m.map((c) => ({ ...c })),
+      })),
+      polymarket: this.pmSignals.map((s) => ({
+        ...s,
+        sparkline24h: [...s.sparkline24h],
+      })),
       telegram: this.telegram.getMessages(),
+      watchedWallet: {
+        ...this.watchedWallet,
+        positions: this.watchedWallet.positions.map((p) => ({ ...p })),
+      },
       portfolio: this.ledger.snapshot(),
     }
   }

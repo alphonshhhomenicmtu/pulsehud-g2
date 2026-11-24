@@ -41,6 +41,8 @@ export class PaperLedger {
         notionalUsd: notional,
         unrealizedPnlUsd: 0,
         unrealizedPnlPct: 0,
+        stopLossPx: null,
+        stopLossMode: null,
         openedAt: now - 1000 * 60 * 42,
       })
     }
@@ -62,6 +64,8 @@ export class PaperLedger {
         notionalUsd: notional,
         unrealizedPnlUsd: 0,
         unrealizedPnlPct: 0,
+        stopLossPx: null,
+        stopLossMode: null,
         openedAt: now - 1000 * 60 * 25,
       })
     }
@@ -133,7 +137,6 @@ export class PaperLedger {
           existing.size = Number(totalSize.toFixed(5))
           existing.entryPrice = Number(avgEntry.toFixed(4))
         } else {
-          // Reducing or flipping an opposing paper perp position
           const closedQty = Math.min(existing.size, qty)
           const dir = existing.side === 'LONG' ? 1 : -1
           const pnl = (fillPrice - existing.entryPrice) * closedQty * dir
@@ -149,6 +152,8 @@ export class PaperLedger {
             existing.side = side
             existing.size = Number(Math.abs(remaining).toFixed(5))
             existing.entryPrice = fillPrice
+            existing.stopLossPx = null
+            existing.stopLossMode = null
           }
         }
       } else {
@@ -163,6 +168,8 @@ export class PaperLedger {
           notionalUsd: notional,
           unrealizedPnlUsd: 0,
           unrealizedPnlPct: 0,
+          stopLossPx: null,
+          stopLossMode: null,
           openedAt: now,
         })
       }
@@ -182,6 +189,100 @@ export class PaperLedger {
       return {
         receipt,
         toast: `FILLED: PAPER ${side} ${market.coin} @ $${formatNumber(fillPrice)}`,
+      }
+    }
+
+    if (action.type === 'hl_partial_close') {
+      const target = this.positions.find(
+        (p) =>
+          p.venue === 'hyperliquid' &&
+          (!action.coin || p.symbol === `${action.coin.toUpperCase()}-PERP`),
+      )
+      if (!target) {
+        const receipt: ExecutionReceipt = {
+          id: `rcpt-${now}`,
+          timestamp: now,
+          type: 'hl_partial_close',
+          title: 'PARTIAL CLOSE SKIPPED',
+          detail: 'No matching open perp position',
+          venue: 'hyperliquid-paper',
+          deliveredExternal: false,
+        }
+        this.receipts.unshift(receipt)
+        return { receipt, toast: 'No open perp position to trim' }
+      }
+
+      this.markToMarket(hl, pm)
+      const fraction = Math.max(0.1, Math.min(0.95, action.closeFraction ?? 0.5))
+      const closedSize = Number((target.size * fraction).toFixed(5))
+      const remainingSize = Number(Math.max(0, target.size - closedSize).toFixed(5))
+      const dir = target.side === 'LONG' ? 1 : -1
+      const realizedPnl = Number(((target.markPrice - target.entryPrice) * closedSize * dir).toFixed(2))
+      this.realizedPnlUsd = Number((this.realizedPnlUsd + realizedPnl).toFixed(2))
+      this.cashUsd = Number((this.cashUsd + realizedPnl).toFixed(2))
+
+      if (remainingSize <= 1e-6) {
+        this.positions = this.positions.filter((p) => p.id !== target.id)
+      } else {
+        target.size = remainingSize
+      }
+
+      this.markToMarket(hl, pm)
+      const pctLabel = Math.round(fraction * 100)
+      const sign = realizedPnl >= 0 ? '+' : ''
+      const receipt: ExecutionReceipt = {
+        id: `rcpt-${now}`,
+        timestamp: now,
+        type: 'hl_partial_close',
+        title: `PARTIAL ${pctLabel}% ${target.symbol}`,
+        detail: `Trimmed ${closedSize} @ $${formatNumber(target.markPrice)} (${sign}$${realizedPnl.toFixed(2)})`,
+        venue: 'hyperliquid-paper',
+        deliveredExternal: false,
+      }
+      this.receipts.unshift(receipt)
+      this.receipts = this.receipts.slice(0, 30)
+      return {
+        receipt,
+        toast: `TRIMMED ${pctLabel}% ${target.symbol} (${sign}$${realizedPnl.toFixed(2)})`,
+      }
+    }
+
+    if (action.type === 'hl_move_sl_be') {
+      const target = this.positions.find(
+        (p) =>
+          p.venue === 'hyperliquid' &&
+          (!action.coin || p.symbol === `${action.coin.toUpperCase()}-PERP`),
+      )
+      if (!target) {
+        const receipt: ExecutionReceipt = {
+          id: `rcpt-${now}`,
+          timestamp: now,
+          type: 'hl_move_sl_be',
+          title: 'BE STOP SKIPPED',
+          detail: 'No matching open perp position',
+          venue: 'hyperliquid-paper',
+          deliveredExternal: false,
+        }
+        this.receipts.unshift(receipt)
+        return { receipt, toast: 'No open position for BE stop' }
+      }
+
+      target.stopLossPx = target.entryPrice
+      target.stopLossMode = 'breakeven'
+      const receipt: ExecutionReceipt = {
+        id: `rcpt-${now}`,
+        timestamp: now,
+        type: 'hl_move_sl_be',
+        title: `BE STOP ${target.symbol}`,
+        detail: `Paper stop moved to break-even @ $${formatNumber(target.entryPrice)}`,
+        venue: 'hyperliquid-paper',
+        deliveredExternal: false,
+      }
+      this.receipts.unshift(receipt)
+      this.receipts = this.receipts.slice(0, 30)
+      return {
+        receipt,
+        toast: `BE STOP ARMED: ${target.symbol} @ $${formatNumber(target.entryPrice)}`,
       }
     }
 
@@ -267,6 +368,8 @@ export class PaperLedger {
           notionalUsd: stake,
           unrealizedPnlUsd: 0,
           unrealizedPnlPct: 0,
+          stopLossPx: null,
+          stopLossMode: null,
           openedAt: now,
         })
       }

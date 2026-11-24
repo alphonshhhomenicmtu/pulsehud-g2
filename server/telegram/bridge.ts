@@ -24,42 +24,86 @@ interface RawTelegramUpdate {
   }
 }
 
+const COIN_ALIASES: ReadonlyArray<[RegExp, string]> = [
+  [/\b(?:btc|bitcoin|\$btc)\b/i, 'BTC'],
+  [/\b(?:eth|ethereum|\$eth)\b/i, 'ETH'],
+  [/\b(?:sol|solana|\$sol)\b/i, 'SOL'],
+  [/\b(?:hype|hyperliquid|\$hype)\b/i, 'HYPE'],
+]
+
+export function detectMentionedCoin(
+  text: string,
+  hl: HyperliquidPerpSignal[] = [],
+): string | undefined {
+  for (const [pattern, ticker] of COIN_ALIASES) {
+    if (pattern.test(text)) {
+      return ticker
+    }
+  }
+  const upper = text.toUpperCase()
+  for (const sig of hl) {
+    const coin = sig.coin.toUpperCase()
+    if (coin.length >= 2 && new RegExp(`(?:^|[^A-Z0-9])\\$?${coin}(?:$|[^A-Z0-9])`).test(upper)) {
+      return coin
+    }
+  }
+  return undefined
+}
+
 export function generateSmartDrafts(
   messageText: string,
   hl: HyperliquidPerpSignal[],
   pm: PolymarketOddsSignal[],
 ): string[] {
   const lower = messageText.toLowerCase()
+  const linked = detectMentionedCoin(messageText, hl)
+  const linkedSig = linked ? hl.find((s) => s.coin === linked) : undefined
   const btc = hl.find((s) => s.coin === 'BTC') ?? hl[0]
-  const eth = hl.find((s) => s.coin === 'ETH')
   const topPm = pm[0]
 
-  const btcPrice = btc ? `$${Math.round(btc.markPx).toLocaleString('en-US')}` : 'mark'
-  const btcFund = btc ? `${btc.fundingAprPct >= 0 ? '+' : ''}${btc.fundingAprPct.toFixed(1)}% APR` : 'live'
-  const pmOdds = topPm ? `${Math.round(topPm.yesPrice * 100)}c` : 'live odds'
-
-  if (lower.includes('funding') || lower.includes('hedge') || lower.includes('perp') || lower.includes('btc')) {
+  if (linkedSig && linkedSig.coin !== 'BTC' && !lower.includes('poly') && !lower.includes('odds')) {
+    const px =
+      linkedSig.markPx >= 100
+        ? `$${Math.round(linkedSig.markPx).toLocaleString('en-US')}`
+        : `$${linkedSig.markPx.toFixed(2)}`
+    const fund = `${linkedSig.fundingAprPct >= 0 ? '+' : ''}${linkedSig.fundingAprPct.toFixed(1)}% APR`
     return [
-      `Copy — hedging 25% BTC @ ${btcPrice} (${btcFund}).`,
-      `Staying flat now; ping me if BTC moves +/-2%.`,
-      `Adding a small Hyperliquid paper hedge & watching OI.`,
+      `Watching ${linkedSig.coin} @ ${px} (${fund}) — hedging 25%.`,
+      `Taking 50% off ${linkedSig.coin} and moving stop to BE.`,
+      `Got ${linkedSig.coin} locked on G2 HUD, acting shortly.`,
     ]
   }
 
-  if (lower.includes('poly') || lower.includes('odds') || lower.includes('yes') || lower.includes('market') || lower.includes('bet')) {
+  const btcPrice = btc ? `$${Math.round(btc.markPx).toLocaleString('en-US')}` : 'mark'
+  const btcFund = btc
+    ? `${btc.fundingAprPct >= 0 ? '+' : ''}${btc.fundingAprPct.toFixed(1)}% APR`
+    : 'live'
+  const pmOdds = topPm ? `${Math.round(topPm.yesPrice * 100)}c` : 'live odds'
+
+  if (
+    lower.includes('funding') ||
+    lower.includes('hedge') ||
+    lower.includes('perp') ||
+    lower.includes('btc')
+  ) {
+    return [
+      `Copy — hedging 25% BTC @ ${btcPrice} (${btcFund}).`,
+      `Staying flat now; ping me if BTC moves +/-2%.`,
+      `Moving BTC stop to BE & trimming 50% on strength.`,
+    ]
+  }
+
+  if (
+    lower.includes('poly') ||
+    lower.includes('odds') ||
+    lower.includes('yes') ||
+    lower.includes('market') ||
+    lower.includes('bet')
+  ) {
     return [
       `Seeing ${pmOdds} on Polymarket — staging $50 YES.`,
       `Moved too fast; waiting for CLOB spread to tighten.`,
       `Good catch — posting updated midpoint in 5m.`,
-    ]
-  }
-
-  if (lower.includes('eth') && eth) {
-    const ethPrice = `$${Math.round(eth.markPx).toLocaleString('en-US')}`
-    return [
-      `Watching ETH @ ${ethPrice} — holding current size.`,
-      `Trimming half on strength; stop to breakeven.`,
-      `Got it on G2 HUD, syncing with desk shortly.`,
     ]
   }
 
@@ -105,6 +149,7 @@ export class TelegramBridge {
     this.seeded = true
     const now = Date.now()
     const btc = hl.find((s) => s.coin === 'BTC')
+    const sol = hl.find((s) => s.coin === 'SOL')
     const topPm = pm[0]
 
     const btcLine = btc
@@ -114,6 +159,10 @@ export class TelegramBridge {
     const pmLine = topPm
       ? `Polymarket "${topPm.shortTitle}" jumped to ${Math.round(topPm.yesPrice * 100)}c (${topPm.change24hCents >= 0 ? '+' : ''}${topPm.change24hCents}c 24h). Taking YES or fading?`
       : 'Polymarket BTC odds moved sharply in the last hour. Taking YES or fading?'
+
+    const solLine = sol
+      ? `SOL breaking out @ $${sol.markPx.toFixed(2)} (${sol.change24hPct >= 0 ? '+' : ''}${sol.change24hPct}%). Lock a paper hedge or trail BE?`
+      : 'SOL volatility expanding on Hyperliquid. Lock a paper hedge or trail BE?'
 
     const seedEntries = [
       {
@@ -135,9 +184,9 @@ export class TelegramBridge {
       {
         id: 'tg-desk-3',
         chatId: this.chatId || 'desk-risk',
-        chatName: 'Risk & Ops',
-        sender: 'Desk Bot',
-        text: 'London open in 15m. Confirm if you want a quick PnL digest posted before the call.',
+        chatName: 'Perp Execution Desk',
+        sender: 'Kai (Quant)',
+        text: solLine,
         receivedAt: now - 1000 * 60 * 14,
       },
     ]
@@ -147,6 +196,7 @@ export class TelegramBridge {
       kind: 'telegram',
       unread: true,
       origin: 'desk_bridge',
+      linkedCoin: detectMentionedCoin(entry.text, hl),
       smartDrafts: generateSmartDrafts(entry.text, hl, pm),
     }))
     this.lastSyncAt = now
@@ -154,6 +204,7 @@ export class TelegramBridge {
 
   public refreshDrafts(hl: HyperliquidPerpSignal[], pm: PolymarketOddsSignal[]): void {
     for (const msg of this.messages) {
+      msg.linkedCoin = detectMentionedCoin(msg.text, hl)
       msg.smartDrafts = generateSmartDrafts(msg.text, hl, pm)
     }
   }
@@ -178,6 +229,7 @@ export class TelegramBridge {
       receivedAt: Date.now(),
       unread: true,
       origin,
+      linkedCoin: detectMentionedCoin(cleanText, hl),
       smartDrafts: generateSmartDrafts(cleanText, hl, pm),
     }
     this.messages.unshift(msg)
@@ -198,7 +250,11 @@ export class TelegramBridge {
         const meRes = await fetch(`${TELEGRAM_API_BASE}/bot${this.botToken}/getMe`, {
           signal: AbortSignal.timeout(5000),
         })
-        const meJson = (await meRes.json()) as { ok: boolean; result?: { username?: string }; description?: string }
+        const meJson = (await meRes.json()) as {
+          ok: boolean
+          result?: { username?: string }
+          description?: string
+        }
         if (!meJson.ok) {
           throw new Error(meJson.description ?? 'Telegram getMe failed')
         }
@@ -207,7 +263,11 @@ export class TelegramBridge {
 
       const url = `${TELEGRAM_API_BASE}/bot${this.botToken}/getUpdates?timeout=0&limit=10${this.lastUpdateId ? `&offset=${this.lastUpdateId + 1}` : ''}`
       const res = await fetch(url, { signal: AbortSignal.timeout(6000) })
-      const data = (await res.json()) as { ok: boolean; result?: RawTelegramUpdate[]; description?: string }
+      const data = (await res.json()) as {
+        ok: boolean
+        result?: RawTelegramUpdate[]
+        description?: string
+      }
       if (!data.ok) {
         throw new Error(data.description ?? 'Telegram getUpdates failed')
       }
@@ -225,7 +285,6 @@ export class TelegramBridge {
         const sender = m.from?.first_name || m.from?.username || 'Telegram User'
         const chatName = m.chat.title || m.chat.username || 'Telegram Direct'
 
-        // Handle interactive Telegram slash commands directly from chat
         if (m.text.startsWith('/')) {
           await this.handleSlashCommand(chatIdStr, m.text, hl, pm, portfolio)
           continue

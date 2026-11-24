@@ -1,37 +1,77 @@
 import {
   injectInboundTelegram,
+  isStaticBrowserMode,
   toggleOfflineReplay,
   triggerRefresh,
   updateTelegramConfig,
+  watchPublicWallet,
 } from '../api/client.js'
+import { shortenAddress, WATCHED_WALLET_PRESETS } from '../../server/feeds/hyperliquid.js'
 import type { PulseHudController } from '../hud/controller.js'
 import { MENU_IDS, type BuiltHudPage, type HudRenderModel } from '../hud/layout.js'
 
 const QUICK_VOICE_PRESETS = [
   'Paper short 1000 BTC',
+  'Take 50% BTC',
+  'Move BTC stop to breakeven',
   'Buy 50 yes BTC',
   'Reply: hedging 25% near mark now',
-  'Send live digest to Telegram',
 ]
+
+const CONTEXT_MENU_ITEMS: ReadonlyArray<{ id: number; label: string }> = [
+  { id: MENU_IDS.ALL_SIGNALS, label: 'All Signals' },
+  { id: MENU_IDS.HYPERLIQUID, label: 'Hyperliquid 15m' },
+  { id: MENU_IDS.POLYMARKET, label: 'Polymarket Odds' },
+  { id: MENU_IDS.TELEGRAM_DESK, label: 'Telegram Desk' },
+  { id: MENU_IDS.WALLET_WATCH, label: 'HL Wallet Watch' },
+  { id: MENU_IDS.PORTFOLIO, label: 'Paper Portfolio' },
+  { id: MENU_IDS.SEND_DIGEST, label: 'Send Digest -> TG' },
+]
+
+interface BrowserSpeechRecognition {
+  lang: string
+  interimResults: boolean
+  maxAlternatives: number
+  onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
+  onerror: ((ev: { error: string }) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognitionCtor = new () => BrowserSpeechRecognition
+
+function getBrowserSpeechRecognition(): SpeechRecognitionCtor | null {
+  if (typeof window === 'undefined') return null
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor
+    webkitSpeechRecognition?: SpeechRecognitionCtor
+  }
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
+}
 
 export function mountCompanionPanel(
   root: HTMLElement,
   controller: PulseHudController,
 ): () => void {
+  const staticMode = isStaticBrowserMode()
+  const hasSpeechApi = getBrowserSpeechRecognition() !== null
+
   root.innerHTML = `
     <div class="shell">
       <header class="topbar">
         <div class="brand">
           <span class="pulse-dot" id="sse-dot"></span>
           <div>
-            <h1>PulseHUD</h1>
-            <p class="subtitle">Even Realities G2 · Read &amp; Write DeFi + Telegram Copilot</p>
+            <h1>PulseHUD <span class="ver-pill">v2.0</span></h1>
+            <p class="subtitle">Even Realities G2 (576×288) · Borderless 15m Candles · HL Wallet Watcher · Coin-Locked TG · 2.0s Undo</p>
           </div>
         </div>
         <div class="top-badges">
           <span class="badge" id="badge-bridge">Checking Bridge...</span>
           <span class="badge" id="badge-hl">HL: --</span>
           <span class="badge" id="badge-pm">PM: --</span>
+          <span class="badge" id="badge-watch">WATCH: --</span>
           <span class="badge" id="badge-tg">TG: --</span>
         </div>
       </header>
@@ -39,8 +79,9 @@ export function mountCompanionPanel(
       <section class="grid-main">
         <article class="panel mirror-panel">
           <div class="panel-head">
-            <h2>Live G2 Lens Mirror (576 × 288 · 4-bit Green)</h2>
+            <h2>Interactive 576×288 Even G2 Waveguide Simulator</h2>
             <div class="btn-row">
+              <button class="btn btn-ghost" id="btn-optics">Optics: Borderless</button>
               <button class="btn btn-ghost" id="btn-refresh">Sync Live</button>
               <button class="btn btn-ghost" id="btn-replay">Replay: OFF</button>
             </div>
@@ -48,47 +89,81 @@ export function mountCompanionPanel(
 
           <div class="g2-lens-frame">
             <div class="g2-canvas" id="g2-mirror"></div>
+            <div class="g2-menu-overlay hidden" id="g2-menu-overlay">
+              <div class="g2-menu-box">
+                <div class="g2-menu-title">≡ EVEN G2 OS CONTEXT MENU</div>
+                <div class="g2-menu-items" id="g2-menu-items"></div>
+              </div>
+            </div>
           </div>
 
           <div class="gesture-bar">
-            <span class="gesture-label">R1 Ring / Temple Controls:</span>
-            <button class="btn" data-gesture="scroll_up">▲ Up</button>
-            <button class="btn" data-gesture="scroll_down">▼ Down</button>
-            <button class="btn btn-primary" data-gesture="click">● Tap (Act)</button>
-            <button class="btn" data-gesture="double_click">✕ Double-Tap</button>
-            <button class="btn" data-menu="${MENU_IDS.HYPERLIQUID}">HL</button>
-            <button class="btn" data-menu="${MENU_IDS.POLYMARKET}">PM</button>
-            <button class="btn" data-menu="${MENU_IDS.TELEGRAM_DESK}">TG</button>
-            <button class="btn" data-menu="${MENU_IDS.PORTFOLIO}">Ledger</button>
+            <span class="gesture-label">R1 Ring / Temple:</span>
+            <button class="btn" data-gesture="scroll_up" title="Keyboard: ArrowUp">▲ Scroll Up</button>
+            <button class="btn" data-gesture="scroll_down" title="Keyboard: ArrowDown">▼ Scroll Down</button>
+            <button class="btn btn-primary" data-gesture="click" title="Keyboard: Enter / Space">● Tap (Act / Undo)</button>
+            <button class="btn" data-gesture="double_click" title="Keyboard: Escape">✕ 2xTap (Back/Undo)</button>
+            <button class="btn" id="btn-os-menu" title="Keyboard: M">≡ OS Menu</button>
+          </div>
+
+          <div class="gesture-bar quick-jumps">
+            <span class="gesture-label">Direct Views:</span>
+            <button class="btn btn-pill" data-menu="${MENU_IDS.HYPERLIQUID}">HL 15m Candles</button>
+            <button class="btn btn-pill" data-menu="${MENU_IDS.POLYMARKET}">Polymarket CLOB</button>
+            <button class="btn btn-pill" data-menu="${MENU_IDS.TELEGRAM_DESK}">Coin-Locked TG</button>
+            <button class="btn btn-pill" data-menu="${MENU_IDS.WALLET_WATCH}">HL Wallet Watch</button>
+            <button class="btn btn-pill" data-menu="${MENU_IDS.PORTFOLIO}">Paper Ledger</button>
+            <span class="kbd-hint">Keys: ↑↓ Scroll · Enter Tap · Esc Undo/Back · M Menu</span>
           </div>
         </article>
 
         <article class="panel voice-panel">
           <div class="panel-head">
-            <h2>Voice Intent Staging (1-Tap G2 Confirm)</h2>
+            <h2>Voice Command &amp; 2.0s Undo Safety Staging</h2>
             <span class="chip" id="stt-chip">STT: local</span>
           </div>
           <p class="hint">
-            Hold the G2 temple/ring for 16 kHz PCM capture, or test a spoken trading / Telegram phrase below — it stages straight onto the G2 Confirm Gate.
+            Every write action enters a <strong>2.0-second Armed Undo Countdown Ring</strong> on the G2 lens — single tap or double-tap cancels cleanly before execution.
           </p>
           <form class="inline-form" id="voice-form">
             <input
               type="text"
               id="voice-input"
-              placeholder='e.g. "Paper short 1000 BTC" or "Reply: hedging 25% now"'
+              placeholder='e.g. "Take 50% BTC", "Move BTC stop to breakeven", or "Reply: hedging"'
               autocomplete="off"
             />
             <button type="submit" class="btn btn-primary">Stage on G2</button>
+            ${hasSpeechApi ? '<button type="button" class="btn" id="btn-web-mic">Mic</button>' : ''}
           </form>
           <div class="preset-row" id="voice-presets"></div>
           <div class="status-line" id="voice-feedback"></div>
+
+          <div class="divider"></div>
+
+          <div class="panel-head">
+            <h2>Live Public Hyperliquid Watcher (clearinghouseState)</h2>
+            <span class="chip chip-safe">READ-ONLY · ZERO CUSTODY</span>
+          </div>
+          <form class="inline-form" id="wallet-watch-form">
+            <input
+              type="text"
+              id="wallet-address-input"
+              placeholder="Paste any public 0x Hyperliquid address..."
+              autocomplete="off"
+            />
+            <button type="submit" class="btn btn-primary">Watch 0x</button>
+          </form>
+          <div class="preset-row" id="wallet-presets"></div>
+          <div class="status-line" id="wallet-feedback"></div>
+          <div class="metrics-strip" id="wallet-metrics"></div>
+          <div class="feed-list compact" id="wallet-positions"></div>
         </article>
       </section>
 
       <section class="grid-secondary">
         <article class="panel">
           <div class="panel-head">
-            <h2>Telegram Desk Bridge</h2>
+            <h2>Coin-Locked Telegram Desk Bridge</h2>
             <span class="chip" id="tg-mode-chip">Desk Bridge</span>
           </div>
           <form class="stack-form" id="tg-inbound-form">
@@ -100,7 +175,7 @@ export function mountCompanionPanel(
               <input
                 type="text"
                 id="tg-text"
-                placeholder="Push an incoming Telegram alert straight to G2 glasses..."
+                placeholder='Push alert with ticker (e.g. "SOL funding +25% — hedge?")...'
                 autocomplete="off"
               />
               <button type="submit" class="btn btn-primary">Push to G2</button>
@@ -108,7 +183,10 @@ export function mountCompanionPanel(
           </form>
           <div class="feed-list" id="tg-list"></div>
 
-          <details class="bot-config">
+          ${
+            staticMode
+              ? `<p class="hint">Hosted Browser Simulator Mode: Live Hyperliquid + Polymarket APIs queried directly in-browser. Run <code>npm run dev</code> locally to pair a live <code>@BotFather</code> Telegram bot.</p>`
+              : `<details class="bot-config">
             <summary>Connect Real Telegram Bot (@BotFather)</summary>
             <p class="hint">Stored in server memory only for this session — never committed to disk.</p>
             <form class="stack-form" id="tg-config-form">
@@ -118,24 +196,50 @@ export function mountCompanionPanel(
                 <button type="submit" class="btn">Connect Bot</button>
               </div>
             </form>
-          </details>
+          </details>`
+          }
         </article>
 
         <article class="panel">
           <div class="panel-head">
-            <h2>Paper Portfolio &amp; Execution Audit Log</h2>
-            <span class="chip chip-safe">PAPER ONLY · ZERO CUSTODY</span>
+            <h2>Paper Portfolio &amp; Confirmed Write Audit Log</h2>
+            <span class="chip chip-safe">PAPER ONLY · 2.0s UNDO SAFE</span>
           </div>
           <div class="metrics-strip" id="portfolio-metrics"></div>
-          <h3 class="section-label">Open Paper Positions (Live Mark-to-Market)</h3>
+          <h3 class="section-label">Open Paper Positions (Live Mark-to-Market + Break-Even Stops)</h3>
           <div class="feed-list" id="positions-list"></div>
-          <h3 class="section-label">Confirmed Write Receipts</h3>
+          <h3 class="section-label">Confirmed Execution Receipts</h3>
           <div class="feed-list" id="receipts-list"></div>
         </article>
       </section>
     </div>
   `
 
+  // Populate interactive OS menu overlay items
+  const menuOverlay = root.querySelector<HTMLDivElement>('#g2-menu-overlay')!
+  const menuItemsEl = root.querySelector<HTMLDivElement>('#g2-menu-items')!
+  for (const item of CONTEXT_MENU_ITEMS) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'g2-menu-item'
+    btn.textContent = `▶ ${item.label}`
+    btn.addEventListener('click', () => {
+      menuOverlay.classList.add('hidden')
+      void controller.handleMenuSelection(item.id)
+    })
+    menuItemsEl.appendChild(btn)
+  }
+
+  root.querySelector<HTMLButtonElement>('#btn-os-menu')!.addEventListener('click', () => {
+    menuOverlay.classList.toggle('hidden')
+  })
+  menuOverlay.addEventListener('click', (e) => {
+    if (e.target === menuOverlay) {
+      menuOverlay.classList.add('hidden')
+    }
+  })
+
+  // Quick voice command presets
   const presetsEl = root.querySelector<HTMLDivElement>('#voice-presets')!
   for (const phrase of QUICK_VOICE_PRESETS) {
     const btn = document.createElement('button')
@@ -168,8 +272,85 @@ export function mountCompanionPanel(
     voiceInput.value = ''
   })
 
+  // Optional Browser Web Speech API zero-key mic capture
+  const webMicBtn = root.querySelector<HTMLButtonElement>('#btn-web-mic')
+  if (webMicBtn) {
+    let activeRec: BrowserSpeechRecognition | null = null
+    webMicBtn.addEventListener('click', () => {
+      if (activeRec) {
+        activeRec.stop()
+        activeRec = null
+        webMicBtn.textContent = 'Mic'
+        return
+      }
+      const Ctor = getBrowserSpeechRecognition()
+      if (!Ctor) return
+      const rec = new Ctor()
+      rec.lang = 'en-US'
+      rec.interimResults = false
+      rec.maxAlternatives = 1
+      activeRec = rec
+      webMicBtn.textContent = 'Stop'
+      voiceFeedback.textContent = 'Listening via Browser Web Speech API...'
+      rec.onresult = (ev) => {
+        const text = ev.results?.[0]?.[0]?.transcript?.trim() ?? ''
+        if (text) {
+          voiceInput.value = text
+          void submitVoicePhrase(text)
+        }
+      }
+      rec.onerror = (ev) => {
+        voiceFeedback.textContent = `Mic error: ${ev.error}`
+      }
+      rec.onend = () => {
+        activeRec = null
+        webMicBtn.textContent = 'Mic'
+      }
+      rec.start()
+    })
+  }
+
+  // Public Hyperliquid Wallet Watcher form & active presets
+  const walletInput = root.querySelector<HTMLInputElement>('#wallet-address-input')!
+  const walletFeedback = root.querySelector<HTMLDivElement>('#wallet-feedback')!
+  const walletPresetsEl = root.querySelector<HTMLDivElement>('#wallet-presets')!
+
+  async function submitWatchedWallet(address: string, label?: string) {
+    const clean = address.trim()
+    if (!clean) return
+    walletFeedback.textContent = `Fetching live Hyperliquid clearinghouseState for ${shortenAddress(clean)}...`
+    try {
+      const res = await watchPublicWallet({ address: clean, label })
+      controller.setState(res.state)
+      await controller.handleMenuSelection(MENU_IDS.WALLET_WATCH)
+      const posCount = res.state.watchedWallet.positions.length
+      walletFeedback.textContent = `Live: ${res.state.watchedWallet.label} (${posCount} open perps, ${res.state.watchedWallet.marginRatioPct.toFixed(1)}% margin)`
+    } catch (err) {
+      walletFeedback.textContent = err instanceof Error ? err.message : 'Wallet watch failed'
+    }
+  }
+
+  for (const preset of WATCHED_WALLET_PRESETS) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'btn btn-pill'
+    btn.textContent = `${preset.label} (${shortenAddress(preset.address)})`
+    btn.addEventListener('click', () => {
+      walletInput.value = preset.address
+      void submitWatchedWallet(preset.address, preset.label)
+    })
+    walletPresetsEl.appendChild(btn)
+  }
+
+  root.querySelector<HTMLFormElement>('#wallet-watch-form')!.addEventListener('submit', (e) => {
+    e.preventDefault()
+    void submitWatchedWallet(walletInput.value)
+  })
+
+  // Gesture buttons & direct views
   root.querySelectorAll<HTMLButtonElement>('[data-gesture]').forEach((btn) => {
     btn.addEventListener('click', () => {
+      menuOverlay.classList.add('hidden')
       const g = btn.dataset.gesture as 'scroll_up' | 'scroll_down' | 'click' | 'double_click'
       void controller.dispatchGesture({ kind: g })
     })
@@ -177,9 +358,15 @@ export function mountCompanionPanel(
 
   root.querySelectorAll<HTMLButtonElement>('[data-menu]').forEach((btn) => {
     btn.addEventListener('click', () => {
+      menuOverlay.classList.add('hidden')
       const id = Number(btn.dataset.menu)
       void controller.handleMenuSelection(id)
     })
+  })
+
+  const opticsBtn = root.querySelector<HTMLButtonElement>('#btn-optics')!
+  opticsBtn.addEventListener('click', () => {
+    controller.toggleBorderlessOptics()
   })
 
   root.querySelector<HTMLButtonElement>('#btn-refresh')!.addEventListener('click', async () => {
@@ -207,28 +394,95 @@ export function mountCompanionPanel(
     textInput.value = ''
   })
 
-  root.querySelector<HTMLFormElement>('#tg-config-form')!.addEventListener('submit', async (e) => {
-    e.preventDefault()
-    const botToken = root.querySelector<HTMLInputElement>('#tg-token')!.value
-    const chatId = root.querySelector<HTMLInputElement>('#tg-chat-id')!.value
-    const res = await updateTelegramConfig({ botToken, chatId })
-    controller.setState(res.state)
-  })
+  const tgConfigForm = root.querySelector<HTMLFormElement>('#tg-config-form')
+  if (tgConfigForm) {
+    tgConfigForm.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const botToken = root.querySelector<HTMLInputElement>('#tg-token')!.value
+      const chatId = root.querySelector<HTMLInputElement>('#tg-chat-id')!.value
+      const res = await updateTelegramConfig({ botToken, chatId })
+      controller.setState(res.state)
+    })
+  }
+
+  // Keyboard shortcuts for fast judge testing inside the browser simulator
+  const onKeyDown = (e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      void controller.dispatchGesture({ kind: 'scroll_up' })
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      void controller.dispatchGesture({ kind: 'scroll_down' })
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      void controller.dispatchGesture({ kind: 'click' })
+    } else if (e.key === 'Escape' || e.key === 'Backspace') {
+      e.preventDefault()
+      menuOverlay.classList.add('hidden')
+      void controller.dispatchGesture({ kind: 'double_click' })
+    } else if (e.key.toLowerCase() === 'm') {
+      e.preventDefault()
+      menuOverlay.classList.toggle('hidden')
+    }
+  }
+  window.addEventListener('keydown', onKeyDown)
 
   const mirrorEl = root.querySelector<HTMLDivElement>('#g2-mirror')!
   const badgeBridge = root.querySelector<HTMLSpanElement>('#badge-bridge')!
   const badgeHl = root.querySelector<HTMLSpanElement>('#badge-hl')!
   const badgePm = root.querySelector<HTMLSpanElement>('#badge-pm')!
+  const badgeWatch = root.querySelector<HTMLSpanElement>('#badge-watch')!
   const badgeTg = root.querySelector<HTMLSpanElement>('#badge-tg')!
   const sttChip = root.querySelector<HTMLSpanElement>('#stt-chip')!
   const tgModeChip = root.querySelector<HTMLSpanElement>('#tg-mode-chip')!
   const tgList = root.querySelector<HTMLDivElement>('#tg-list')!
+  const walletMetricsEl = root.querySelector<HTMLDivElement>('#wallet-metrics')!
+  const walletPositionsEl = root.querySelector<HTMLDivElement>('#wallet-positions')!
   const metricsEl = root.querySelector<HTMLDivElement>('#portfolio-metrics')!
   const positionsList = root.querySelector<HTMLDivElement>('#positions-list')!
   const receiptsList = root.querySelector<HTMLDivElement>('#receipts-list')!
 
   const renderMirror = (page: BuiltHudPage) => {
     mirrorEl.innerHTML = ''
+
+    // Render 4-bit monochrome waveguide ImageContainerProperty buffers via crisp pixel canvas
+    for (const img of page.imageSlots) {
+      const cvs = document.createElement('canvas')
+      cvs.className = 'g2-img-slot'
+      cvs.width = img.width
+      cvs.height = img.height
+      cvs.style.left = `${(img.xPosition / 576) * 100}%`
+      cvs.style.top = `${(img.yPosition / 288) * 100}%`
+      cvs.style.width = `${(img.width / 576) * 100}%`
+      cvs.style.height = `${(img.height / 288) * 100}%`
+      const ctx = cvs.getContext('2d')
+      if (ctx) {
+        const imgData = ctx.createImageData(img.width, img.height)
+        const rgba = imgData.data
+        for (let i = 0; i < img.pixels.length; i += 1) {
+          const lum = img.pixels[i]
+          const o = i * 4
+          if (lum === 0) {
+            rgba[o] = 0
+            rgba[o + 1] = 0
+            rgba[o + 2] = 0
+            rgba[o + 3] = 0
+          } else {
+            const norm = lum / 255
+            rgba[o] = Math.round(69 * norm)
+            rgba[o + 1] = Math.round(255 * Math.min(1, 0.28 + norm * 0.72))
+            rgba[o + 2] = Math.round(152 * norm)
+            rgba[o + 3] = Math.round(255 * Math.min(1, 0.25 + norm * 0.75))
+          }
+        }
+        ctx.putImageData(imgData, 0, 0)
+      }
+      mirrorEl.appendChild(cvs)
+    }
+
+    // Render TextContainerProperty slots
     for (const slot of page.slots) {
       const box = document.createElement('div')
       box.className = `g2-slot brightness-${slot.textColor}`
@@ -249,37 +503,80 @@ export function mountCompanionPanel(
 
   const renderState = (model: HudRenderModel, page: BuiltHudPage, bridgeConnected: boolean) => {
     renderMirror(page)
-    const { health, portfolio, telegram, offlineReplay } = model.state
+    const { health, portfolio, telegram, watchedWallet, offlineReplay } = model.state
 
+    opticsBtn.textContent = model.borderlessOptics ? 'Optics: Borderless' : 'Optics: Framed'
     replayEnabled = offlineReplay
     replayBtn.textContent = offlineReplay ? 'Replay: ON' : 'Replay: OFF'
 
-    badgeBridge.textContent = bridgeConnected ? 'G2 Bridge: Connected' : 'Standalone Preview'
-    badgeBridge.className = `badge ${bridgeConnected ? 'ok' : 'warn'}`
+    badgeBridge.textContent = bridgeConnected
+      ? 'G2 Bridge: Connected'
+      : staticMode
+        ? 'Web G2 Simulator (Direct Live)'
+        : 'Standalone Preview'
+    badgeBridge.className = `badge ${bridgeConnected || staticMode ? 'ok' : 'warn'}`
 
-    badgeHl.textContent = `HL: ${health.hyperliquid.status.toUpperCase()}${health.hyperliquid.latencyMs ? ` ${health.hyperliquid.latencyMs}ms` : ''}`
+    badgeHl.textContent = `HL: ${health.hyperliquid.status.toUpperCase()}${health.hyperliquid.candlesLoaded ? ' +15m' : ''}${health.hyperliquid.latencyMs ? ` ${health.hyperliquid.latencyMs}ms` : ''}`
     badgeHl.className = `badge ${health.hyperliquid.status === 'live' ? 'ok' : 'warn'}`
 
     badgePm.textContent = `PM: ${health.polymarket.status.toUpperCase()}${health.polymarket.clobVerified ? ' +CLOB' : ''}`
     badgePm.className = `badge ${health.polymarket.status === 'live' ? 'ok' : 'warn'}`
 
+    badgeWatch.textContent = `WATCH: ${watchedWallet.status.toUpperCase()} (${watchedWallet.positions.length})`
+    badgeWatch.className = `badge ${watchedWallet.status === 'live' ? 'ok' : 'warn'}`
+
     badgeTg.textContent = `TG: ${health.telegram.mode === 'live_bot' ? 'LIVE BOT' : 'DESK'} (${health.telegram.unreadCount})`
     badgeTg.className = `badge ${health.telegram.mode === 'live_bot' ? 'ok' : ''}`
 
-    sttChip.textContent = `STT: ${health.stt.provider}`
+    sttChip.textContent = `STT: ${hasSpeechApi ? 'web-speech + local' : health.stt.provider}`
     tgModeChip.textContent =
       health.telegram.mode === 'live_bot'
         ? `@${health.telegram.botUsername ?? 'Bot'} Live`
-        : 'Interactive Desk Bridge'
+        : 'Coin-Locked Desk Bridge'
 
-    // Telegram inbox list
+    // Watched Public Hyperliquid Wallet metrics & positions
+    if (!walletInput.value) {
+      walletInput.value = watchedWallet.address
+    }
+    const wPnlSign = watchedWallet.totalUnrealizedPnlUsd >= 0 ? '+' : ''
+    walletMetricsEl.innerHTML = `
+      <div class="metric-card"><span>Acct Value</span><strong>$${Math.round(watchedWallet.accountValueUsd).toLocaleString('en-US')}</strong></div>
+      <div class="metric-card"><span>Margin Ratio</span><strong class="${watchedWallet.marginRatioPct >= 65 ? 'neg' : 'pos'}">${watchedWallet.marginRatioPct.toFixed(1)}%</strong></div>
+      <div class="metric-card"><span>Live uPnL</span><strong class="${watchedWallet.totalUnrealizedPnlUsd >= 0 ? 'pos' : 'neg'}">${wPnlSign}$${Math.round(watchedWallet.totalUnrealizedPnlUsd).toLocaleString('en-US')}</strong></div>
+    `
+    walletPositionsEl.innerHTML =
+      watchedWallet.positions.length === 0
+        ? `<div class="muted">${escapeHtml(watchedWallet.error ?? 'No open perp positions on this public address.')}</div>`
+        : watchedWallet.positions
+            .slice(0, 4)
+            .map((p) => {
+              const s = p.unrealizedPnlUsd >= 0 ? '+' : ''
+              const liqText =
+                p.liqDistancePct !== null
+                  ? p.liqDistancePct > 99
+                    ? '>99%'
+                    : `${p.liqDistancePct.toFixed(1)}%`
+                  : 'SAFE'
+              const liqDanger = p.liqDistancePct !== null && p.liqDistancePct < 10
+              return `
+          <div class="list-row">
+            <div class="row-top">
+              <strong>${escapeHtml(p.coin)} · ${p.side} ${p.leverage}x</strong>
+              <span class="${p.unrealizedPnlUsd >= 0 ? 'pos' : 'neg'}">${s}$${Math.round(p.unrealizedPnlUsd).toLocaleString('en-US')}</span>
+            </div>
+            <div class="muted">Entry $${p.entryPx.toLocaleString('en-US', { maximumFractionDigits: 2 })} · Mark $${p.markPx.toLocaleString('en-US', { maximumFractionDigits: 2 })} · <span class="${liqDanger ? 'neg' : 'pos'}">Liq Dist ${liqText}</span></div>
+          </div>`
+            })
+            .join('')
+
+    // Telegram inbox list with Coin-Lock tags
     tgList.innerHTML = telegram
       .slice(0, 4)
       .map(
         (m) => `
       <div class="list-row ${m.unread ? 'unread' : ''}">
         <div class="row-top">
-          <strong>${escapeHtml(m.sender)}</strong>
+          <strong>${escapeHtml(m.sender)}${m.linkedCoin ? ` <span class="coin-tag">${escapeHtml(m.linkedCoin)}</span>` : ''}</strong>
           <span class="muted">${escapeHtml(m.chatName)}</span>
         </div>
         <div class="row-body">${escapeHtml(m.text)}</div>
@@ -307,10 +604,14 @@ export function mountCompanionPanel(
                 p.venue === 'polymarket'
                   ? `${Math.round(p.markPrice * 100)}c`
                   : `$${p.markPrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+              const beBadge =
+                p.stopLossMode === 'breakeven' && p.stopLossPx
+                  ? ` <span class="coin-tag">BE @ $${p.stopLossPx.toLocaleString('en-US', { maximumFractionDigits: 1 })}</span>`
+                  : ''
               return `
           <div class="list-row">
             <div class="row-top">
-              <strong>${escapeHtml(p.symbol)} · ${p.side}</strong>
+              <strong>${escapeHtml(p.symbol)} · ${p.side}${beBadge}</strong>
               <span class="${p.unrealizedPnlUsd >= 0 ? 'pos' : 'neg'}">${s}$${p.unrealizedPnlUsd.toFixed(2)} (${s}${p.unrealizedPnlPct.toFixed(1)}%)</span>
             </div>
             <div class="muted">Size ${p.size} · Mark ${markText} · Notional $${p.notionalUsd.toFixed(2)}</div>
@@ -320,7 +621,7 @@ export function mountCompanionPanel(
 
     receiptsList.innerHTML =
       portfolio.receipts.length === 0
-        ? '<div class="muted">Tap any signal on the G2 glasses and confirm to see verified receipts here.</div>'
+        ? '<div class="muted">Tap any signal on the G2 glasses and hold through the 2.0s undo countdown to see verified receipts here.</div>'
         : portfolio.receipts
             .slice(0, 6)
             .map(
@@ -336,9 +637,14 @@ export function mountCompanionPanel(
             .join('')
   }
 
-  return controller.subscribe(({ model, page, bridgeConnected }) => {
+  const unsub = controller.subscribe(({ model, page, bridgeConnected }) => {
     renderState(model, page, bridgeConnected)
   })
+
+  return () => {
+    window.removeEventListener('keydown', onKeyDown)
+    unsub()
+  }
 }
 
 function escapeHtml(raw: string): string {

@@ -33,7 +33,6 @@ async function fetchJson<T>(url: string, timeoutMs = 8000): Promise<T> {
     const res = await fetch(url, {
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'PulseHUD-EvenG2/1.0',
       },
       signal: controller.signal,
     })
@@ -44,6 +43,27 @@ async function fetchJson<T>(url: string, timeoutMs = 8000): Promise<T> {
   } finally {
     clearTimeout(timer)
   }
+}
+
+export function buildPolymarketSparkline(
+  yesPrice: number,
+  change24hCents: number,
+  points = 24,
+): number[] {
+  const start = Math.max(0.03, Math.min(0.97, yesPrice - change24hCents / 100))
+  const out: number[] = []
+  const seed = Math.round(yesPrice * 1000) % 41
+  for (let i = 0; i < points; i += 1) {
+    const t = i / Math.max(1, points - 1)
+    const eased = start + (yesPrice - start) * (0.35 * t + 0.65 * t * t)
+    const ripple =
+      i === 0 || i === points - 1
+        ? 0
+        : Math.sin((i + seed) * 0.72) * 0.018 + Math.cos((i + seed) * 0.35) * 0.01
+    out.push(Number(Math.max(0.02, Math.min(0.98, eased + ripple)).toFixed(4)))
+  }
+  out[points - 1] = Number(Math.max(0.02, Math.min(0.98, yesPrice)).toFixed(4))
+  return out
 }
 
 function condenseQuestion(question: string): string {
@@ -78,16 +98,28 @@ async function fetchClobDetail(tokenId: string): Promise<{
   bestBid: number | null
   bestAsk: number | null
   spreadCents: number | null
+  historyPoints: number[]
 }> {
   try {
-    const [midRes, bookRes] = await Promise.all([
-      fetchJson<{ mid?: string }>(`${CLOB_BASE}/midpoint?token_id=${encodeURIComponent(tokenId)}`, 5000),
+    const [midRes, bookRes, histRes] = await Promise.all([
+      fetchJson<{ mid?: string }>(
+        `${CLOB_BASE}/midpoint?token_id=${encodeURIComponent(tokenId)}`,
+        5000,
+      ),
       fetchJson<RawClobBook>(`${CLOB_BASE}/book?token_id=${encodeURIComponent(tokenId)}`, 5000),
+      fetchJson<{ history?: Array<{ p?: number | string }> }>(
+        `${CLOB_BASE}/prices-history?market=${encodeURIComponent(tokenId)}&interval=1d&fidelity=60`,
+        4500,
+      ).catch(() => ({ history: [] })),
     ])
 
     const clobMidpoint = midRes.mid ? Number(midRes.mid) : null
-    const bidPrices = (bookRes.bids ?? []).map((b) => Number(b.price)).filter((n) => Number.isFinite(n) && n > 0)
-    const askPrices = (bookRes.asks ?? []).map((a) => Number(a.price)).filter((n) => Number.isFinite(n) && n > 0)
+    const bidPrices = (bookRes.bids ?? [])
+      .map((b) => Number(b.price))
+      .filter((n) => Number.isFinite(n) && n > 0)
+    const askPrices = (bookRes.asks ?? [])
+      .map((a) => Number(a.price))
+      .filter((n) => Number.isFinite(n) && n > 0)
 
     const bestBid = bidPrices.length > 0 ? Math.max(...bidPrices) : null
     const bestAsk = askPrices.length > 0 ? Math.min(...askPrices) : null
@@ -96,9 +128,20 @@ async function fetchClobDetail(tokenId: string): Promise<{
         ? Number(((bestAsk - bestBid) * 100).toFixed(1))
         : null
 
-    return { clobMidpoint, bestBid, bestAsk, spreadCents }
+    const historyPoints = (histRes.history ?? [])
+      .map((pt) => Number(pt.p))
+      .filter((n) => Number.isFinite(n) && n >= 0 && n <= 1)
+      .slice(-24)
+
+    return { clobMidpoint, bestBid, bestAsk, spreadCents, historyPoints }
   } catch {
-    return { clobMidpoint: null, bestBid: null, bestAsk: null, spreadCents: null }
+    return {
+      clobMidpoint: null,
+      bestBid: null,
+      bestAsk: null,
+      spreadCents: null,
+      historyPoints: [],
+    }
   }
 }
 
@@ -139,7 +182,6 @@ export async function fetchLivePolymarketSignals(): Promise<{
     const eventTitle = (event.title ?? '').trim()
     if (!eventTitle || seenEvents.has(eventTitle)) continue
 
-    // Pick the highest-volume active binary orderbook market inside each event with informative odds
     const markets = (event.markets ?? [])
       .filter((m) => m.active && !m.closed && m.enableOrderBook && m.clobTokenIds)
       .sort((a, b) => Number(b.volume24hr ?? 0) - Number(a.volume24hr ?? 0))
@@ -173,6 +215,7 @@ export async function fetchLivePolymarketSignals(): Promise<{
         spreadCents: null,
         change24hCents,
         volume24hUsd: vol24h,
+        sparkline24h: buildPolymarketSparkline(yes, change24hCents),
         alertTag: classifyPolymarketAlert(change24hCents, vol24h),
         updatedAt: now,
       }
@@ -185,7 +228,6 @@ export async function fetchLivePolymarketSignals(): Promise<{
     }
   }
 
-  // Sort to highlight meaningful 24h odds swings + liquid crypto/macro markets
   const topFive = candidates
     .sort((a, b) => {
       const scoreA = a.volume24hUsd + Math.abs(a.change24hCents) * 25_000
@@ -198,16 +240,33 @@ export async function fetchLivePolymarketSignals(): Promise<{
   const clobDetails = await Promise.all(topFive.slice(0, 3).map((item) => fetchClobDetail(item.tokenId)))
   for (let i = 0; i < clobDetails.length; i += 1) {
     const detail = clobDetails[i]
+    const nextYes = detail.clobMidpoint ?? topFive[i].yesPrice
+    const sparkline24h =
+      detail.historyPoints.length >= 6
+        ? detail.historyPoints
+        : buildPolymarketSparkline(nextYes, topFive[i].change24hCents)
+
     if (detail.clobMidpoint !== null) {
       clobVerified = true
       topFive[i] = {
         ...topFive[i],
         yesPrice: Number(detail.clobMidpoint.toFixed(4)),
         noPrice: Number((1 - detail.clobMidpoint).toFixed(4)),
-        ...detail,
+        clobMidpoint: detail.clobMidpoint,
+        bestBid: detail.bestBid,
+        bestAsk: detail.bestAsk,
+        spreadCents: detail.spreadCents,
+        sparkline24h,
       }
     } else {
-      topFive[i] = { ...topFive[i], ...detail }
+      topFive[i] = {
+        ...topFive[i],
+        clobMidpoint: detail.clobMidpoint,
+        bestBid: detail.bestBid,
+        bestAsk: detail.bestAsk,
+        spreadCents: detail.spreadCents,
+        sparkline24h,
+      }
     }
   }
 

@@ -1,5 +1,5 @@
 import { waitForEvenAppBridge, type EvenAppBridge } from '@evenrealities/even_hub_sdk'
-import { fetchState, subscribeStateStream } from './api/client.js'
+import { fetchState, isStaticBrowserMode, subscribeStateStream } from './api/client.js'
 import { mountCompanionPanel } from './companion/panel.js'
 import { PulseHudController } from './hud/controller.js'
 import './styles.css'
@@ -14,13 +14,15 @@ declare global {
 }
 
 async function resolveEvenBridge(): Promise<EvenAppBridge | null> {
+  if (isStaticBrowserMode() && typeof window.flutter_inappwebview?.callHandler !== 'function') {
+    return null
+  }
   try {
     const bridge = await Promise.race([
       waitForEvenAppBridge(),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
     ])
     if (!bridge) return null
-    // Verify native host handler exists (Even App WebView or Even Hub Simulator)
     if (typeof window.flutter_inappwebview?.callHandler !== 'function') {
       console.info('[PulseHUD] Running in standalone browser preview (no Even host WebView detected).')
       return null
@@ -54,7 +56,7 @@ async function bootstrap() {
   })
 
   console.log(
-    `[PulseHUD] Ready | bridge=${bridge ? 'even-g2' : 'standalone'} | HL=${initialState.health.hyperliquid.status} | PM=${initialState.health.polymarket.status} | TG=${initialState.health.telegram.mode}`,
+    `[PulseHUD] Ready | bridge=${bridge ? 'even-g2' : isStaticBrowserMode() ? 'web-sim' : 'standalone'} | HL=${initialState.health.hyperliquid.status} | PM=${initialState.health.polymarket.status} | WATCH=${initialState.watchedWallet.status} | TG=${initialState.health.telegram.mode}`,
   )
 }
 

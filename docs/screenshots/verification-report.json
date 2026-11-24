@@ -1,18 +1,20 @@
 {
-  "verifiedAt": "2026-11-24T02:16:22.610Z",
+  "verifiedAt": "2026-11-24T09:23:23.415Z",
+  "version": "2.0.0",
   "simulatorVersion": "0.9.5",
   "sdkVersion": "0.0.16",
   "bridgeMode": "even-g2",
   "health": {
     "hyperliquid": {
       "status": "live",
-      "latencyMs": 2080,
-      "lastSyncAt": 1795486577226
+      "latencyMs": 2114,
+      "lastSyncAt": 1795512198409,
+      "candlesLoaded": true
     },
     "polymarket": {
       "status": "live",
-      "latencyMs": 3067,
-      "lastSyncAt": 1795486577226,
+      "latencyMs": 3161,
+      "lastSyncAt": 1795512198409,
       "clobVerified": true
     },
     "telegram": {
@@ -20,7 +22,7 @@
       "botUsername": null,
       "chatIdConfigured": false,
       "unreadCount": 3,
-      "lastSyncAt": 1795486582606
+      "lastSyncAt": 1795512203412
     },
     "stt": {
       "provider": "local_command"
@@ -29,42 +31,45 @@
   "hyperliquidCount": 5,
   "hyperliquidTop": {
     "coin": "BTC",
-    "markPx": 60782,
-    "change24hPct": -0.07,
-    "fundingAprPct": 5.8,
-    "spreadBps": 0.16
+    "markPx": 59859.7,
+    "change24hPct": -2.93,
+    "fundingAprPct": -7.1,
+    "spreadBps": 0.17,
+    "candles15mCount": 24
   },
   "polymarketCount": 5,
-  "polymarketTop": {
-    "shortTitle": "Fed increase rates by 25 bps at Dec FOMC?",
-    "yesPrice": 0.935,
-    "clobMidpoint": 0.935,
-    "spreadCents": 1
+  "watchedWallet": {
+    "address": "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
+    "status": "live",
+    "accountValueUsd": 32395225.15,
+    "marginRatioPct": 29.33,
+    "positionsCount": 12
   },
   "voiceIntentTest": {
-    "transcript": "Buy 50 yes BTC",
-    "stagedHeadline": "POLYMARKET PAPER YES $50"
+    "transcript": "Take 50% BTC",
+    "stagedHeadline": "PARTIAL 50% CLOSE BTC-PERP"
   },
   "telegramInboundTest": {
     "ok": true,
+    "linkedCoin": "ETH",
     "smartDraftCount": 3
   },
   "executedReceipts": [
     {
-      "id": "rcpt-1795486578670",
-      "timestamp": 1795486578670,
+      "id": "rcpt-1795512196596",
+      "timestamp": 1795512196596,
       "type": "hl_paper_short",
       "title": "PAPER SHORT BTC",
-      "detail": "0.01645 BTC @ $60,800 ($1000 notional)",
+      "detail": "0.01671 BTC @ $59,845 ($1000 notional)",
       "venue": "hyperliquid-paper",
       "deliveredExternal": false
     },
     {
-      "id": "rcpt-1795486575278",
-      "timestamp": 1795486575278,
+      "id": "rcpt-1795512190456",
+      "timestamp": 1795512190456,
       "type": "tg_reply",
       "title": "TG REPLY SENT",
-      "detail": "Telegram Desk Bridge: \"Copy — hedging 25% BTC @ $60,842 (+5.8% APR).\"",
+      "detail": "Telegram Desk Bridge: \"Copy — hedging 25% BTC @ $59,827 (-7.4% APR).\"",
       "venue": "telegram",
       "deliveredExternal": false
     }
@@ -75,26 +80,30 @@
       "venue": "hyperliquid",
       "symbol": "BTC-PERP",
       "side": "LONG",
-      "size": 0.02497,
-      "entryPrice": 60354.87,
-      "markPrice": 60782,
-      "notionalUsd": 1517.73,
-      "unrealizedPnlUsd": 10.67,
-      "unrealizedPnlPct": 0.71,
-      "openedAt": 1795484044144
+      "size": 0.02541,
+      "entryPrice": 59348.38,
+      "markPrice": 59859.7,
+      "notionalUsd": 1521.03,
+      "unrealizedPnlUsd": 12.99,
+      "unrealizedPnlPct": 0.86,
+      "stopLossPx": null,
+      "stopLossMode": null,
+      "openedAt": 1795509655230
     },
     {
-      "id": "pos-pm-3215008",
+      "id": "pos-pm-7121526",
       "venue": "polymarket",
-      "symbol": "Fed increase rates by 25 bps at Dec FOMC?",
+      "symbol": "ETH be above $1,700 on November 24?",
       "side": "YES",
-      "size": 134.08,
-      "entryPrice": 0.895,
-      "markPrice": 0.935,
-      "notionalUsd": 125.36,
-      "unrealizedPnlUsd": 5.36,
-      "unrealizedPnlPct": 4.47,
-      "openedAt": 1795485064144
+      "size": 424.78,
+      "entryPrice": 0.2825,
+      "markPrice": 0.3325,
+      "notionalUsd": 141.24,
+      "unrealizedPnlUsd": 21.24,
+      "unrealizedPnlPct": 17.7,
+      "stopLossPx": null,
+      "stopLossMode": null,
+      "openedAt": 1795510675230
     }
   ],
   "lvglMissingGlyphCount": 0,

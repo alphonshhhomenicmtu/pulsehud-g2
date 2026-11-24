@@ -24,7 +24,7 @@ export function encodePcm16ToWav(pcm: Uint8Array, sampleRate = 16000): Buffer {
   header.write('WAVE', 8)
   header.write('fmt ', 12)
   header.writeUInt32LE(16, 16)
-  header.writeUInt16LE(1, 20) // PCM
+  header.writeUInt16LE(1, 20)
   header.writeUInt16LE(numChannels, 22)
   header.writeUInt32LE(sampleRate, 24)
   header.writeUInt32LE(byteRate, 28)
@@ -37,8 +37,8 @@ export function encodePcm16ToWav(pcm: Uint8Array, sampleRate = 16000): Buffer {
 }
 
 export function detectSttProvider(): 'openai_whisper' | 'deepgram' | 'local_command' {
-  if (process.env.OPENAI_API_KEY?.trim()) return 'openai_whisper'
-  if (process.env.DEEPGRAM_API_KEY?.trim()) return 'deepgram'
+  if (typeof process !== 'undefined' && process.env?.OPENAI_API_KEY?.trim()) return 'openai_whisper'
+  if (typeof process !== 'undefined' && process.env?.DEEPGRAM_API_KEY?.trim()) return 'deepgram'
   return 'local_command'
 }
 
@@ -75,15 +75,18 @@ export async function transcribeGlassesAudio(pcm: Uint8Array): Promise<{
 
   const deepgramKey = process.env.DEEPGRAM_API_KEY?.trim()
   if (deepgramKey) {
-    const res = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true', {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${deepgramKey}`,
-        'Content-Type': 'audio/wav',
+    const res = await fetch(
+      'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${deepgramKey}`,
+          'Content-Type': 'audio/wav',
+        },
+        body: new Uint8Array(wav),
+        signal: AbortSignal.timeout(12_000),
       },
-      body: new Uint8Array(wav),
-      signal: AbortSignal.timeout(12_000),
-    })
+    )
     if (!res.ok) {
       throw new Error(`Deepgram HTTP ${res.status}`)
     }
@@ -102,13 +105,23 @@ export async function transcribeGlassesAudio(pcm: Uint8Array): Promise<{
     transcript: '',
     provider: 'local_command',
     notice:
-      'Captured real 16 kHz PCM audio from G2 mic. Set OPENAI_API_KEY or DEEPGRAM_API_KEY in .env for cloud STT, or use the companion voice command bar.',
+      'Captured real 16 kHz PCM from G2 mic. Set OPENAI_API_KEY/DEEPGRAM_API_KEY for cloud STT, or use Browser Web Speech / Voice Bar.',
   }
+}
+
+function extractCoin(lower: string): string | undefined {
+  const coinMatch = lower.match(/\b(btc|bitcoin|eth|ethereum|sol|solana|hype)\b/i)
+  if (!coinMatch) return undefined
+  const token = coinMatch[1].toLowerCase()
+  if (token.startsWith('bit')) return 'BTC'
+  if (token.startsWith('eth')) return 'ETH'
+  if (token.startsWith('sol')) return 'SOL'
+  return token.toUpperCase()
 }
 
 /**
  * Deterministic voice-to-StagedAction parser.
- * Every parsed intent ALWAYS returns a staged action requiring explicit 1-tap confirmation on G2.
+ * Every parsed intent ALWAYS returns a staged action requiring explicit 1-tap arming + 2.0s undo window on G2.
  */
 export function parseVoiceIntent(
   rawTranscript: string,
@@ -126,7 +139,9 @@ export function parseVoiceIntent(
   const now = Date.now()
 
   // 1. Reply to Telegram desk message
-  const replyMatch = transcript.match(/^(?:reply|tell desk|message desk|text desk|send reply)\s*[:,-]?\s*(.+)$/i)
+  const replyMatch = transcript.match(
+    /^(?:reply|tell desk|message desk|text desk|send reply)\s*[:,-]?\s*(.+)$/i,
+  )
   if (replyMatch) {
     const body = replyMatch[1].trim()
     const targetMsg =
@@ -139,7 +154,7 @@ export function parseVoiceIntent(
       label: 'Send Voice Reply -> TG',
       headline: `TG REPLY -> ${targetMsg?.chatName ?? 'Alpha Desk'}`,
       summary: `"${body}"`,
-      riskNote: '1 tap delivers to Telegram Desk. Double-tap cancels.',
+      riskNote: 'Tap arms 2.0s undo countdown before Telegram send.',
       signalId: targetMsg?.id,
       telegramChatId: targetMsg?.chatId,
       telegramText: body,
@@ -148,7 +163,10 @@ export function parseVoiceIntent(
   }
 
   // 2. Broadcast live digest to Telegram
-  if (lower.includes('digest') || (lower.includes('send') && lower.includes('telegram') && lower.includes('update'))) {
+  if (
+    lower.includes('digest') ||
+    (lower.includes('send') && lower.includes('telegram') && lower.includes('update'))
+  ) {
     const digest = formatDigestText(context.hl, context.pm, context.portfolio)
     return {
       id: `stage-${now}`,
@@ -156,30 +174,81 @@ export function parseVoiceIntent(
       label: 'Broadcast Digest -> TG',
       headline: 'POST LIVE DIGEST -> TELEGRAM',
       summary: digest.slice(0, 120),
-      riskNote: 'Read-only market summary. 1 tap sends to Telegram.',
+      riskNote: 'Read-only market summary · 2.0s undo safety window.',
       telegramText: digest,
       source: 'voice',
     }
   }
 
-  // 3. Flatten / close position
-  if (lower.includes('flatten') || lower.includes('close position') || lower.includes('exit position')) {
-    const coinMatch = lower.match(/\b(btc|eth|sol|hype)\b/i)
-    const coin = coinMatch ? coinMatch[1].toUpperCase() : undefined
+  // 3. Move Stop-Loss to Break-Even (BE)
+  if (
+    lower.includes('breakeven') ||
+    lower.includes('break even') ||
+    lower.includes('break-even') ||
+    /\bsl to be\b/.test(lower) ||
+    /\bstop to be\b/.test(lower)
+  ) {
+    const coin = extractCoin(lower) ?? context.portfolio.positions.find((p) => p.venue === 'hyperliquid')?.symbol.replace('-PERP', '') ?? 'BTC'
+    return {
+      id: `stage-${now}`,
+      type: 'hl_move_sl_be',
+      label: `Move ${coin} Stop -> Break-Even`,
+      headline: `PAPER BE STOP ${coin}-PERP`,
+      summary: `Arm protective paper break-even stop at entry price on ${coin}-PERP.`,
+      riskNote: 'PAPER MODE ONLY · Tap arms 2.0s undo countdown.',
+      coin,
+      source: 'voice',
+    }
+  }
+
+  // 4. Take 50% / Partial Close
+  if (
+    lower.includes('partial') ||
+    lower.includes('take 50') ||
+    lower.includes('trim half') ||
+    lower.includes('close half') ||
+    lower.includes('take half')
+  ) {
+    const coin = extractCoin(lower) ?? context.portfolio.positions.find((p) => p.venue === 'hyperliquid')?.symbol.replace('-PERP', '') ?? 'BTC'
+    return {
+      id: `stage-${now}`,
+      type: 'hl_partial_close',
+      label: `Take 50% Partial Close ${coin}`,
+      headline: `PARTIAL 50% CLOSE ${coin}-PERP`,
+      summary: `Reduce ${coin}-PERP paper position by 50% at live mark price.`,
+      riskNote: 'PAPER MODE ONLY · Tap arms 2.0s undo countdown.',
+      coin,
+      closeFraction: 0.5,
+      source: 'voice',
+    }
+  }
+
+  // 5. Flatten / close position
+  if (
+    lower.includes('flatten') ||
+    lower.includes('close position') ||
+    lower.includes('exit position')
+  ) {
+    const coin = extractCoin(lower)
     return {
       id: `stage-${now}`,
       type: 'hl_flatten',
       label: coin ? `Flatten ${coin} Paper Pos` : 'Flatten Top Paper Pos',
       headline: coin ? `PAPER FLATTEN ${coin}-PERP` : 'PAPER FLATTEN TOP POSITION',
       summary: 'Close active paper position at current live mark.',
-      riskNote: 'PAPER MODE ONLY · Zero real funds at risk.',
+      riskNote: 'PAPER MODE ONLY · 2.0s post-tap undo window active.',
       coin,
       source: 'voice',
     }
   }
 
-  // 4. Polymarket paper YES / NO bet
-  if (lower.includes('yes') || lower.includes('no') || lower.includes('polymarket') || lower.includes('bet')) {
+  // 6. Polymarket paper YES / NO bet
+  if (
+    lower.includes('yes') ||
+    lower.includes('no') ||
+    lower.includes('polymarket') ||
+    lower.includes('bet')
+  ) {
     const isNo = /\bno\b/.test(lower) && !/\byes\b/.test(lower)
     const side = isNo ? 'NO' : 'YES'
     const amountMatch = lower.match(/\$?\s*(\d{2,4})\b/)
@@ -187,8 +256,14 @@ export function parseVoiceIntent(
 
     const activePm = context.pm.find((m) => m.id === context.activeSignalId)
     const keywordPm =
-      context.pm.find((m) => lower.includes('eth') && m.shortTitle.toLowerCase().includes('eth')) ??
-      context.pm.find((m) => (lower.includes('btc') || lower.includes('bitcoin')) && m.shortTitle.toLowerCase().includes('btc')) ??
+      context.pm.find(
+        (m) => lower.includes('eth') && m.shortTitle.toLowerCase().includes('eth'),
+      ) ??
+      context.pm.find(
+        (m) =>
+          (lower.includes('btc') || lower.includes('bitcoin')) &&
+          m.shortTitle.toLowerCase().includes('btc'),
+      ) ??
       context.pm.find((m) => lower.includes('fed') && m.shortTitle.toLowerCase().includes('fed'))
 
     const target = activePm ?? keywordPm ?? context.pm[0]
@@ -201,7 +276,7 @@ export function parseVoiceIntent(
         label: `Paper ${side} $${notionalUsd} @ ${cents}c`,
         headline: `POLYMARKET PAPER ${side} $${notionalUsd}`,
         summary: `${target.shortTitle} @ ${cents}c`,
-        riskNote: 'PAPER MODE ONLY · Live CLOB odds · 1 tap confirms.',
+        riskNote: 'PAPER MODE ONLY · Live CLOB · 2.0s undo safety window.',
         signalId: target.id,
         marketId: target.marketId,
         notionalUsd,
@@ -211,7 +286,7 @@ export function parseVoiceIntent(
     }
   }
 
-  // 5. Hyperliquid paper LONG / SHORT / HEDGE
+  // 7. Hyperliquid paper LONG / SHORT / HEDGE
   if (
     lower.includes('long') ||
     lower.includes('short') ||
@@ -221,16 +296,7 @@ export function parseVoiceIntent(
   ) {
     const isShort = lower.includes('short') || lower.includes('hedge') || lower.includes('sell')
     const side = isShort ? 'SHORT' : 'LONG'
-    const coinMatch = lower.match(/\b(btc|bitcoin|eth|ethereum|sol|solana|hype)\b/i)
-    const normalizedCoin = coinMatch
-      ? coinMatch[1].toLowerCase().startsWith('bit')
-        ? 'BTC'
-        : coinMatch[1].toLowerCase().startsWith('eth')
-          ? 'ETH'
-          : coinMatch[1].toLowerCase().startsWith('sol')
-            ? 'SOL'
-            : coinMatch[1].toUpperCase()
-      : undefined
+    const normalizedCoin = extractCoin(lower)
 
     const activeHl = context.hl.find((s) => s.id === context.activeSignalId)
     const target =
@@ -241,14 +307,15 @@ export function parseVoiceIntent(
     if (target) {
       const amountMatch = lower.match(/\$?\s*(\d{2,5})\b/)
       const notionalUsd = amountMatch ? Number(amountMatch[1]) : 1000
-      const px = side === 'LONG' ? (target.bestAsk ?? target.markPx) : (target.bestBid ?? target.markPx)
+      const px =
+        side === 'LONG' ? (target.bestAsk ?? target.markPx) : (target.bestBid ?? target.markPx)
       return {
         id: `stage-${now}`,
         type: side === 'LONG' ? 'hl_paper_long' : 'hl_paper_short',
         label: `Paper ${side} ${target.coin} $${notionalUsd}`,
         headline: `HYPERLIQUID PAPER ${side} ${target.coin}`,
         summary: `$${notionalUsd.toLocaleString('en-US')} notional @ $${px.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
-        riskNote: 'PAPER MODE ONLY · Zero custody · 1 tap confirms.',
+        riskNote: 'PAPER MODE ONLY · Zero custody · 2.0s undo safety window.',
         signalId: target.id,
         coin: target.coin,
         notionalUsd,
@@ -258,12 +325,17 @@ export function parseVoiceIntent(
     }
   }
 
-  // 6. Share alert to Telegram
-  if (lower.includes('share') || lower.includes('alert') || lower.includes('telegram') || lower.includes('post')) {
-    const coinMatch = lower.match(/\b(btc|eth|sol|hype)\b/i)
-    const targetHl = coinMatch
-      ? context.hl.find((s) => s.coin === coinMatch[1].toUpperCase())
-      : context.hl.find((s) => s.id === context.activeSignalId) ?? context.hl[0]
+  // 8. Share alert to Telegram
+  if (
+    lower.includes('share') ||
+    lower.includes('alert') ||
+    lower.includes('telegram') ||
+    lower.includes('post')
+  ) {
+    const coin = extractCoin(lower)
+    const targetHl = coin
+      ? context.hl.find((s) => s.coin === coin)
+      : (context.hl.find((s) => s.id === context.activeSignalId) ?? context.hl[0])
     if (targetHl) {
       const text = `[PulseHUD Alert] Hyperliquid ${targetHl.coin}-PERP $${targetHl.markPx.toLocaleString('en-US')} (${targetHl.change24hPct >= 0 ? '+' : ''}${targetHl.change24hPct}% 24h | Funding ${targetHl.fundingAprPct >= 0 ? '+' : ''}${targetHl.fundingAprPct}% APR)`
       return {
@@ -272,7 +344,7 @@ export function parseVoiceIntent(
         label: `Share ${targetHl.coin} Alert -> TG`,
         headline: `POST ${targetHl.coin} ALERT -> TELEGRAM`,
         summary: text.slice(0, 115),
-        riskNote: '1 tap posts formatted live alert to Telegram Desk.',
+        riskNote: 'Tap arms 2.0s undo countdown before Telegram post.',
         signalId: targetHl.id,
         telegramText: text,
         source: 'voice',

@@ -1,4 +1,10 @@
-import type { HyperliquidPerpSignal, PolymarketOddsSignal } from '../../shared/types.js'
+import type {
+  HyperliquidPerpSignal,
+  PolymarketOddsSignal,
+  WatchedWalletSnapshot,
+} from '../../shared/types.js'
+import { DEFAULT_WATCHED_HL_ADDRESS, synthesizeFallbackCandles } from './hyperliquid.js'
+import { buildPolymarketSparkline } from './polymarket.js'
 
 /**
  * Verified snapshot captured from live Hyperliquid Info & Polymarket Gamma/CLOB APIs.
@@ -21,6 +27,7 @@ export function createFallbackHyperliquidSignals(now = Date.now()): HyperliquidP
       bestBid: 61579.0,
       bestAsk: 61581.0,
       spreadBps: 0.32,
+      candles15m: synthesizeFallbackCandles(61580.5, 61076.0, 24, now),
       alertTag: 'TOP LIQUIDITY',
       updatedAt: now,
     },
@@ -38,6 +45,7 @@ export function createFallbackHyperliquidSignals(now = Date.now()): HyperliquidP
       bestBid: 1719.9,
       bestAsk: 1720.2,
       spreadBps: 1.74,
+      candles15m: synthesizeFallbackCandles(1720.1, 1716.9, 24, now),
       alertTag: 'TOP LIQUIDITY',
       updatedAt: now,
     },
@@ -55,6 +63,7 @@ export function createFallbackHyperliquidSignals(now = Date.now()): HyperliquidP
       bestBid: 142.82,
       bestAsk: 142.87,
       spreadBps: 3.5,
+      candles15m: synthesizeFallbackCandles(142.85, 136.9, 24, now),
       alertTag: 'FUNDING HOT',
       updatedAt: now,
     },
@@ -72,6 +81,7 @@ export function createFallbackHyperliquidSignals(now = Date.now()): HyperliquidP
       bestBid: 24.61,
       bestAsk: 24.63,
       spreadBps: 8.12,
+      candles15m: synthesizeFallbackCandles(24.62, 23.4, 24, now),
       alertTag: 'FUNDING HOT',
       updatedAt: now,
     },
@@ -96,6 +106,7 @@ export function createFallbackPolymarketSignals(now = Date.now()): PolymarketOdd
       spreadCents: 2.0,
       change24hCents: 19.5,
       volume24hUsd: 54_888,
+      sparkline24h: buildPolymarketSparkline(0.8695, 19.5),
       alertTag: 'ODDS SURGE',
       updatedAt: now,
     },
@@ -115,6 +126,7 @@ export function createFallbackPolymarketSignals(now = Date.now()): PolymarketOdd
       spreadCents: 1.0,
       change24hCents: -8.0,
       volume24hUsd: 102_772,
+      sparkline24h: buildPolymarketSparkline(0.445, -8.0),
       alertTag: 'ODDS DROP',
       updatedAt: now,
     },
@@ -134,6 +146,7 @@ export function createFallbackPolymarketSignals(now = Date.now()): PolymarketOdd
       spreadCents: 1.0,
       change24hCents: -2.0,
       volume24hUsd: 71_628,
+      sparkline24h: buildPolymarketSparkline(0.2005, -2.0),
       alertTag: 'ACTIVE BOOK',
       updatedAt: now,
     },
@@ -153,8 +166,70 @@ export function createFallbackPolymarketSignals(now = Date.now()): PolymarketOdd
       spreadCents: 1.0,
       change24hCents: -5.4,
       volume24hUsd: 9_283,
+      sparkline24h: buildPolymarketSparkline(0.167, -5.4),
       alertTag: 'ODDS DROP',
       updatedAt: now,
     },
   ]
+}
+
+export function createFallbackWatchedWallet(now = Date.now()): WatchedWalletSnapshot {
+  return {
+    address: DEFAULT_WATCHED_HL_ADDRESS,
+    label: 'HL Multi-Asset Whale',
+    status: 'replay',
+    accountValueUsd: 32_219_345,
+    totalMarginUsedUsd: 9_831_739,
+    marginRatioPct: 30.51,
+    totalUnrealizedPnlUsd: 554_839.3,
+    withdrawableUsd: 22_387_606,
+    positions: [
+      {
+        coin: 'BTC',
+        side: 'SHORT',
+        size: 41.5018,
+        leverage: 20,
+        leverageType: 'cross',
+        entryPx: 60435.2,
+        markPx: 61580.5,
+        positionValueUsd: 2_555_701,
+        unrealizedPnlUsd: -47531.9,
+        returnOnEquityPct: -37.2,
+        liquidationPx: 69420.0,
+        liqDistancePct: 12.73,
+        cumFundingUsd: -1820.5,
+      },
+      {
+        coin: 'ETH',
+        side: 'SHORT',
+        size: 4773.475,
+        leverage: 15,
+        leverageType: 'cross',
+        entryPx: 1706.1,
+        markPx: 1720.1,
+        positionValueUsd: 8_210_854,
+        unrealizedPnlUsd: -66828.6,
+        returnOnEquityPct: -12.2,
+        liquidationPx: 2048.5,
+        liqDistancePct: 19.09,
+        cumFundingUsd: -942.0,
+      },
+      {
+        coin: 'SOL',
+        side: 'SHORT',
+        size: 19382,
+        leverage: 20,
+        leverageType: 'cross',
+        entryPx: 145.1,
+        markPx: 142.85,
+        positionValueUsd: 2_768_718,
+        unrealizedPnlUsd: 43609.5,
+        returnOnEquityPct: 31.5,
+        liquidationPx: 162.4,
+        liqDistancePct: 13.69,
+        cumFundingUsd: 612.3,
+      },
+    ],
+    updatedAt: now,
+  }
 }

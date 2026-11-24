@@ -1,10 +1,12 @@
 import {
   AudioInputSource,
+  ImageRawDataUpdate,
   TextContainerUpgrade,
   type EvenAppBridge,
   type EvenHubEvent,
 } from '@evenrealities/even_hub_sdk'
 import type {
+  ExecuteActionResponse,
   HudChannel,
   PulseStateSnapshot,
   SignalCard,
@@ -19,12 +21,22 @@ import {
   toRebuildPageContainer,
   toStartUpPageContainer,
   type BuiltHudPage,
+  type HudLayoutKey,
   type HudRenderModel,
   type HudScreenKind,
 } from './layout.js'
 
+const HL_ORDER_SIZES = [250, 500, 1000, 2500] as const
+const PM_STAKE_SIZES = [25, 50, 100, 250] as const
+export const UNDO_SAFETY_WINDOW_MS = 2000
+
 export interface HudSnapshotListener {
   (view: { model: HudRenderModel; page: BuiltHudPage; bridgeConnected: boolean }): void
+}
+
+export interface PulseHudControllerOptions {
+  undoWindowMs?: number
+  executeActionFn?: (action: StagedAction) => Promise<ExecuteActionResponse>
 }
 
 export class PulseHudController {
@@ -32,28 +44,47 @@ export class PulseHudController {
   private state: PulseStateSnapshot
   private screen: HudScreenKind = 'feed'
   private channel: HudChannel = 'all'
+  private borderlessOptics = true
+  private hlSizeIdx = 2 // Default $1,000
+  private pmSizeIdx = 1 // Default $50
   private signalIndex = 0
   private actions: StagedAction[] = []
   private actionIndex = 0
   private stagedAction: StagedAction | null = null
   private confirmSelection: 'confirm' | 'cancel' = 'confirm'
+
+  // 2.0-second Post-Tap Undo Safety Window state
+  private readonly undoWindowMs: number
+  private confirmArmedUntil: number | null = null
+  private confirmTickTimer: ReturnType<typeof setInterval> | null = null
+  private confirmCommitTimer: ReturnType<typeof setTimeout> | null = null
+
+  private readonly executeActionFn: (action: StagedAction) => Promise<ExecuteActionResponse>
+
   private voiceCapture = new GlassesAudioCapture()
   private voiceStatusLine = 'Hold temple or R1 ring to dictate a command.'
   private voiceTick = 0
-  private voiceTimer: number | null = null
+  private voiceTimer: ReturnType<typeof setInterval> | null = null
   private toast: string | null = null
-  private toastTimer: number | null = null
+  private toastTimer: ReturnType<typeof setTimeout> | null = null
 
   private pageInitialized = false
-  private currentLayoutKey: HudScreenKind | null = null
+  private currentLayoutKey: HudLayoutKey | null = null
   private lastRenderedContents = new Map<number, string>()
+  private lastRenderedImages = new Map<number, string>()
   private renderQueue: Promise<void> = Promise.resolve()
   private listeners = new Set<HudSnapshotListener>()
   private unsubscribeBridge: (() => void) | null = null
 
-  constructor(bridge: EvenAppBridge | null, initialState: PulseStateSnapshot) {
+  constructor(
+    bridge: EvenAppBridge | null,
+    initialState: PulseStateSnapshot,
+    options: PulseHudControllerOptions = {},
+  ) {
     this.bridge = bridge
     this.state = initialState
+    this.undoWindowMs = options.undoWindowMs ?? UNDO_SAFETY_WINDOW_MS
+    this.executeActionFn = options.executeActionFn ?? executeStagedAction
   }
 
   public async mount(): Promise<void> {
@@ -68,12 +99,13 @@ export class PulseHudController {
   public destroy(): void {
     this.unsubscribeBridge?.()
     this.unsubscribeBridge = null
+    this.clearUndoTimers()
     if (this.voiceTimer !== null) {
-      window.clearInterval(this.voiceTimer)
+      clearInterval(this.voiceTimer)
       this.voiceTimer = null
     }
     if (this.toastTimer !== null) {
-      window.clearTimeout(this.toastTimer)
+      clearTimeout(this.toastTimer)
       this.toastTimer = null
     }
     if (this.voiceCapture.isActive()) {
@@ -101,12 +133,26 @@ export class PulseHudController {
     void this.syncDisplay(false)
   }
 
+  public toggleBorderlessOptics(): void {
+    this.borderlessOptics = !this.borderlessOptics
+    // Border geometry changed -> force rebuild next render
+    this.currentLayoutKey = null
+    void this.syncDisplay(false)
+  }
+
+  public getHlOrderSizeUsd(): number {
+    return HL_ORDER_SIZES[this.hlSizeIdx]
+  }
+
+  public getPmStakeSizeUsd(): number {
+    return PM_STAKE_SIZES[this.pmSizeIdx]
+  }
+
   public getVisibleSignals(): SignalCard[] {
     if (this.channel === 'hyperliquid') return this.state.hyperliquid
     if (this.channel === 'polymarket') return this.state.polymarket
     if (this.channel === 'telegram') return this.state.telegram
 
-    // Interleave high-signal items across Hyperliquid, Polymarket, and Telegram
     const mixed: SignalCard[] = []
     const maxLen = Math.max(
       this.state.hyperliquid.length,
@@ -127,9 +173,17 @@ export class PulseHudController {
   }
 
   public getRenderModel(): HudRenderModel {
+    const armed = this.confirmArmedUntil !== null
+    const remainingMs = armed
+      ? Math.max(0, this.confirmArmedUntil! - Date.now())
+      : this.undoWindowMs
+
     return {
       screen: this.screen,
       channel: this.channel,
+      borderlessOptics: this.borderlessOptics,
+      hlOrderSizeUsd: this.getHlOrderSizeUsd(),
+      pmStakeSizeUsd: this.getPmStakeSizeUsd(),
       state: this.state,
       signals: this.getVisibleSignals(),
       signalIndex: this.signalIndex,
@@ -137,6 +191,9 @@ export class PulseHudController {
       actionIndex: this.actionIndex,
       stagedAction: this.stagedAction,
       confirmSelection: this.confirmSelection,
+      confirmArmed: armed,
+      confirmRemainingMs: remainingMs,
+      confirmTotalMs: this.undoWindowMs,
       voiceActive: this.voiceCapture.isActive(),
       voiceStatusLine: this.voiceStatusLine,
       voiceDurationMs: this.voiceCapture.getDurationMs(),
@@ -149,9 +206,9 @@ export class PulseHudController {
   public showToast(message: string, durationMs = 4500): void {
     this.toast = message
     if (this.toastTimer !== null) {
-      window.clearTimeout(this.toastTimer)
+      clearTimeout(this.toastTimer)
     }
-    this.toastTimer = window.setTimeout(() => {
+    this.toastTimer = setTimeout(() => {
       this.toast = null
       this.toastTimer = null
       void this.syncDisplay(false)
@@ -164,16 +221,10 @@ export class PulseHudController {
     await this.dispatchGesture(gesture)
   }
 
-  /**
-   * Public gesture dispatcher — used by real G2 hardware/simulator events
-   * AND by the Companion WebView quick-test controls.
-   */
   public async dispatchGesture(gesture: NormalizedHudGesture): Promise<void> {
     if (gesture.kind === 'ignore') return
 
     if (gesture.kind === 'foreground_change') {
-      // Opening or closing the OS contextual menu delivers FOREGROUND_ENTER / FOREGROUND_EXIT.
-      // Never tear down app state here.
       return
     }
 
@@ -193,6 +244,7 @@ export class PulseHudController {
     }
 
     if (gesture.kind === 'long_press') {
+      this.clearUndoTimers()
       await this.beginVoiceCapture()
       return
     }
@@ -204,10 +256,9 @@ export class PulseHudController {
       return
     }
 
-    // Screen-specific navigation & write handlers
+    // Feed screen
     if (this.screen === 'feed') {
       if (gesture.kind === 'double_click') {
-        // Root page QA requirement: invoke native system exit confirmation dialog (mode 1).
         await this.bridge?.shutDownPageContainer(1)
         return
       }
@@ -238,6 +289,7 @@ export class PulseHudController {
       }
     }
 
+    // Action Picker screen
     if (this.screen === 'actions') {
       if (gesture.kind === 'double_click') {
         this.screen = 'feed'
@@ -257,13 +309,62 @@ export class PulseHudController {
       if (gesture.kind === 'click') {
         const chosen = this.actions[this.actionIndex]
         if (!chosen) return
+
+        // Immediate non-destructive UI commands (dynamic size cycle / Coin-Locked TG->Trade jump)
+        if (chosen.uiCommand === 'cycle_hl_size') {
+          this.hlSizeIdx = (this.hlSizeIdx + 1) % HL_ORDER_SIZES.length
+          const active = this.getActiveSignal()
+          if (active) {
+            this.actions = this.buildActionsForSignal(active)
+          }
+          await this.syncDisplay(false)
+          return
+        }
+
+        if (chosen.uiCommand === 'cycle_pm_size') {
+          this.pmSizeIdx = (this.pmSizeIdx + 1) % PM_STAKE_SIZES.length
+          const active = this.getActiveSignal()
+          if (active) {
+            this.actions = this.buildActionsForSignal(active)
+          }
+          await this.syncDisplay(false)
+          return
+        }
+
+        if (chosen.uiCommand === 'jump_coin_trade' && chosen.coin) {
+          const hlIdx = this.state.hyperliquid.findIndex(
+            (s) => s.coin.toUpperCase() === chosen.coin!.toUpperCase(),
+          )
+          const targetSignal =
+            hlIdx >= 0 ? this.state.hyperliquid[hlIdx] : this.state.hyperliquid[0]
+          if (targetSignal) {
+            this.channel = 'hyperliquid'
+            this.signalIndex = Math.max(0, hlIdx)
+            this.actions = this.buildActionsForSignal(targetSignal)
+            this.actionIndex = 0
+            this.screen = 'actions'
+            await this.syncDisplay(false)
+          }
+          return
+        }
+
         this.openConfirmGate(chosen)
         await this.syncDisplay(false)
         return
       }
     }
 
+    // Confirm Gate + 2.0-Second Post-Tap Undo Safety Window
     if (this.screen === 'confirm') {
+      // During the 2.0s Armed Countdown Window: ANY single tap OR double-tap cancels cleanly!
+      if (this.confirmArmedUntil !== null) {
+        if (gesture.kind === 'click' || gesture.kind === 'double_click') {
+          this.cancelArmedUndo()
+          return
+        }
+        return
+      }
+
       if (gesture.kind === 'double_click') {
         this.stagedAction = null
         this.screen = 'feed'
@@ -282,11 +383,13 @@ export class PulseHudController {
           this.showToast('Action cancelled')
           return
         }
-        await this.commitStagedAction()
+        // Arm the 2.0-second Undo Safety Window instead of firing blindly!
+        this.armUndoCountdown()
         return
       }
     }
 
+    // Voice screen
     if (this.screen === 'voice') {
       if (gesture.kind === 'double_click') {
         await this.cancelVoiceCapture()
@@ -303,8 +406,50 @@ export class PulseHudController {
       }
     }
 
+    // Live Public Hyperliquid Wallet Watcher screen
+    if (this.screen === 'wallet') {
+      if (
+        gesture.kind === 'double_click' ||
+        gesture.kind === 'scroll_up' ||
+        gesture.kind === 'scroll_down'
+      ) {
+        this.screen = 'feed'
+        await this.syncDisplay(false)
+        return
+      }
+      if (gesture.kind === 'click') {
+        const topWatched = this.state.watchedWallet.positions[0]
+        if (!topWatched) {
+          this.screen = 'feed'
+          this.showToast('No open positions on watched wallet')
+          return
+        }
+        const hedgeSide = topWatched.side === 'LONG' ? 'SHORT' : 'LONG'
+        const sizeUsd = this.getHlOrderSizeUsd()
+        this.openConfirmGate({
+          id: `stage-watch-${Date.now()}`,
+          type: hedgeSide === 'SHORT' ? 'hl_paper_short' : 'hl_paper_long',
+          label: `Paper ${hedgeSide} $${sizeUsd} ${topWatched.coin}`,
+          headline: `HEDGE WATCHED ${topWatched.coin} (${hedgeSide})`,
+          summary: `Counter-hedge ${topWatched.side} ${topWatched.coin} $${sizeUsd} paper @ $${topWatched.markPx.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+          riskNote: 'PAPER MODE ONLY · Mirrors read-only public HL watcher · 2s undo.',
+          coin: topWatched.coin,
+          notionalUsd: sizeUsd,
+          limitPrice: topWatched.markPx,
+          source: 'tap',
+        })
+        await this.syncDisplay(false)
+        return
+      }
+    }
+
+    // Paper Portfolio screen
     if (this.screen === 'portfolio') {
-      if (gesture.kind === 'double_click' || gesture.kind === 'scroll_up' || gesture.kind === 'scroll_down') {
+      if (
+        gesture.kind === 'double_click' ||
+        gesture.kind === 'scroll_up' ||
+        gesture.kind === 'scroll_down'
+      ) {
         this.screen = 'feed'
         await this.syncDisplay(false)
         return
@@ -316,14 +461,15 @@ export class PulseHudController {
           this.showToast('Portfolio is already flat')
           return
         }
-        const coin = topPos.venue === 'hyperliquid' ? topPos.symbol.replace('-PERP', '') : undefined
+        const coin =
+          topPos.venue === 'hyperliquid' ? topPos.symbol.replace('-PERP', '') : undefined
         this.openConfirmGate({
           id: `stage-${Date.now()}`,
           type: 'hl_flatten',
           label: `Flatten ${topPos.symbol}`,
           headline: `PAPER FLATTEN ${topPos.symbol}`,
           summary: `Close ${topPos.side} paper position at live mark (uPnL ${topPos.unrealizedPnlUsd >= 0 ? '+' : ''}$${topPos.unrealizedPnlUsd.toFixed(2)}).`,
-          riskNote: 'PAPER MODE ONLY · Zero real funds · 1 tap confirms.',
+          riskNote: 'PAPER MODE ONLY · Tap arms 2.0s undo countdown.',
           coin,
           source: 'tap',
         })
@@ -334,6 +480,7 @@ export class PulseHudController {
   }
 
   public async handleMenuSelection(itemID: number): Promise<void> {
+    this.clearUndoTimers()
     if (this.voiceCapture.isActive()) {
       await this.cancelVoiceCapture()
     }
@@ -363,6 +510,10 @@ export class PulseHudController {
         this.screen = 'feed'
         await this.syncDisplay(false)
         return
+      case MENU_IDS.WALLET_WATCH:
+        this.screen = 'wallet'
+        await this.syncDisplay(false)
+        return
       case MENU_IDS.PORTFOLIO:
         this.screen = 'portfolio'
         await this.syncDisplay(false)
@@ -379,7 +530,7 @@ export class PulseHudController {
           label: 'Send Digest -> TG',
           headline: 'POST LIVE DIGEST -> TELEGRAM',
           summary: preview,
-          riskNote: 'Read-only digest · 1 tap sends to Telegram Desk.',
+          riskNote: 'Read-only digest · Tap arms 2.0s undo countdown.',
           source: 'menu',
         })
         await this.syncDisplay(false)
@@ -399,23 +550,61 @@ export class PulseHudController {
     if (response.stagedAction) {
       this.openConfirmGate(response.stagedAction)
       await this.syncDisplay(false)
-      return `Staged "${response.stagedAction.headline}" on G2 HUD — 1 tap to confirm.`
+      return `Staged "${response.stagedAction.headline}" on G2 — tap arms 2.0s undo window.`
     }
     this.showToast(response.notice)
     return response.notice
   }
 
   private openConfirmGate(action: StagedAction): void {
+    this.clearUndoTimers()
     this.stagedAction = action
     this.confirmSelection = 'confirm'
     this.screen = 'confirm'
+  }
+
+  private clearUndoTimers(): void {
+    this.confirmArmedUntil = null
+    if (this.confirmTickTimer !== null) {
+      clearInterval(this.confirmTickTimer)
+      this.confirmTickTimer = null
+    }
+    if (this.confirmCommitTimer !== null) {
+      clearTimeout(this.confirmCommitTimer)
+      this.confirmCommitTimer = null
+    }
+  }
+
+  private armUndoCountdown(): void {
+    this.clearUndoTimers()
+    this.confirmArmedUntil = Date.now() + this.undoWindowMs
+    void this.syncDisplay(false)
+
+    // Smooth visual countdown updates for both text progress bar AND 4-bit ring graphic
+    this.confirmTickTimer = setInterval(() => {
+      if (this.confirmArmedUntil === null) return
+      void this.syncDisplay(false)
+    }, 180)
+
+    this.confirmCommitTimer = setTimeout(() => {
+      this.clearUndoTimers()
+      void this.commitStagedAction()
+    }, this.undoWindowMs)
+  }
+
+  private cancelArmedUndo(): void {
+    this.clearUndoTimers()
+    const label = this.stagedAction?.headline ?? 'Action'
+    this.stagedAction = null
+    this.screen = 'feed'
+    this.showToast(`UNDONE · Cancelled ${label}`)
   }
 
   private async commitStagedAction(): Promise<void> {
     const action = this.stagedAction
     if (!action) return
     try {
-      const result = await executeStagedAction(action)
+      const result = await this.executeActionFn(action)
       this.state = result.state
       this.stagedAction = null
       this.screen = 'feed'
@@ -434,15 +623,14 @@ export class PulseHudController {
     this.voiceStatusLine = 'Listening on G2 4-mic array...'
     this.screen = 'voice'
     await this.syncDisplay(false)
-    // Open G2 mic non-blocking with timeout guard so HUD never stalls if host denies mic permission
     void Promise.race([
       this.bridge?.audioControl(true, AudioInputSource.Glasses).catch(() => false),
       new Promise((r) => setTimeout(r, 1200)),
     ])
     if (this.voiceTimer !== null) {
-      window.clearInterval(this.voiceTimer)
+      clearInterval(this.voiceTimer)
     }
-    this.voiceTimer = window.setInterval(() => {
+    this.voiceTimer = setInterval(() => {
       this.voiceTick += 1
       void this.syncDisplay(false)
     }, 280)
@@ -450,7 +638,7 @@ export class PulseHudController {
 
   private async cancelVoiceCapture(): Promise<void> {
     if (this.voiceTimer !== null) {
-      window.clearInterval(this.voiceTimer)
+      clearInterval(this.voiceTimer)
       this.voiceTimer = null
     }
     this.voiceCapture.stopAndEncodeBase64()
@@ -464,7 +652,7 @@ export class PulseHudController {
 
   private async finishVoiceCapture(): Promise<void> {
     if (this.voiceTimer !== null) {
-      window.clearInterval(this.voiceTimer)
+      clearInterval(this.voiceTimer)
       this.voiceTimer = null
     }
     void Promise.race([
@@ -498,52 +686,99 @@ export class PulseHudController {
   private buildActionsForSignal(signal: SignalCard): StagedAction[] {
     const now = Date.now()
     if (signal.kind === 'hyperliquid') {
+      const sizeUsd = this.getHlOrderSizeUsd()
       const longPx = signal.bestAsk ?? signal.markPx
       const shortPx = signal.bestBid ?? signal.markPx
+      const existingPos = this.state.portfolio.positions.find(
+        (p) => p.venue === 'hyperliquid' && p.symbol === `${signal.coin}-PERP`,
+      )
       const alertText = `[PulseHUD G2] Hyperliquid ${signal.coin}-PERP $${signal.markPx.toLocaleString('en-US')} (${signal.change24hPct >= 0 ? '+' : ''}${signal.change24hPct}% 24h | Funding ${signal.fundingAprPct >= 0 ? '+' : ''}${signal.fundingAprPct}% APR)`
 
-      return [
+      const list: StagedAction[] = [
         {
           id: `act-short-${now}`,
           type: 'hl_paper_short',
-          label: `Paper Short $1,000 ${signal.coin} (Hedge)`,
+          label: `Paper Short $${sizeUsd.toLocaleString('en-US')} ${signal.coin} (Hedge)`,
           headline: `HYPERLIQUID PAPER SHORT ${signal.coin}`,
-          summary: `$1,000 notional @ $${shortPx.toLocaleString('en-US', { maximumFractionDigits: 2 })} (live L2 bid)`,
-          riskNote: 'PAPER MODE ONLY · Zero custody · 1 tap executes.',
+          summary: `$${sizeUsd.toLocaleString('en-US')} notional @ $${shortPx.toLocaleString('en-US', { maximumFractionDigits: 2 })} (live L2 bid)`,
+          riskNote: 'PAPER MODE ONLY · Zero custody · 2.0s post-tap undo window.',
           signalId: signal.id,
           coin: signal.coin,
-          notionalUsd: 1000,
+          notionalUsd: sizeUsd,
           limitPrice: shortPx,
           source: 'tap',
         },
         {
           id: `act-long-${now}`,
           type: 'hl_paper_long',
-          label: `Paper Long $1,000 ${signal.coin} (Market)`,
+          label: `Paper Long $${sizeUsd.toLocaleString('en-US')} ${signal.coin} (Market)`,
           headline: `HYPERLIQUID PAPER LONG ${signal.coin}`,
-          summary: `$1,000 notional @ $${longPx.toLocaleString('en-US', { maximumFractionDigits: 2 })} (live L2 ask)`,
-          riskNote: 'PAPER MODE ONLY · Zero custody · 1 tap executes.',
+          summary: `$${sizeUsd.toLocaleString('en-US')} notional @ $${longPx.toLocaleString('en-US', { maximumFractionDigits: 2 })} (live L2 ask)`,
+          riskNote: 'PAPER MODE ONLY · Zero custody · 2.0s post-tap undo window.',
           signalId: signal.id,
           coin: signal.coin,
-          notionalUsd: 1000,
+          notionalUsd: sizeUsd,
           limitPrice: longPx,
           source: 'tap',
         },
         {
-          id: `act-tg-${now}`,
-          type: 'tg_share_signal',
-          label: `Post ${signal.coin} Alert -> Telegram Desk`,
-          headline: `POST ${signal.coin} ALERT -> TELEGRAM`,
-          summary: alertText,
-          riskNote: 'Read-only market alert · 1 tap posts to Telegram Desk.',
-          signalId: signal.id,
-          telegramText: alertText,
+          id: `act-size-${now}`,
+          type: 'hl_paper_short',
+          label: `Order Size: $${sizeUsd.toLocaleString('en-US')}  [Tap to Cycle $250/$500/$1k/$2.5k]`,
+          headline: 'CYCLE SIZE',
+          summary: '',
+          riskNote: '',
+          coin: signal.coin,
+          uiCommand: 'cycle_hl_size',
           source: 'tap',
         },
       ]
+
+      if (existingPos) {
+        list.push(
+          {
+            id: `act-partial-${now}`,
+            type: 'hl_partial_close',
+            label: `Take 50% Partial Close ${signal.coin} (${existingPos.side})`,
+            headline: `PARTIAL 50% CLOSE ${signal.coin}-PERP`,
+            summary: `Trim 50% of ${existingPos.size} ${signal.coin} @ $${signal.markPx.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+            riskNote: 'PAPER MODE ONLY · Locks realized PnL · 2.0s undo window.',
+            signalId: signal.id,
+            coin: signal.coin,
+            closeFraction: 0.5,
+            source: 'tap',
+          },
+          {
+            id: `act-be-${now}`,
+            type: 'hl_move_sl_be',
+            label: `Move ${signal.coin} Stop -> Break-Even ($${existingPos.entryPrice.toLocaleString('en-US', { maximumFractionDigits: 1 })})`,
+            headline: `MOVE STOP TO BE · ${signal.coin}-PERP`,
+            summary: `Arm protective break-even stop @ $${existingPos.entryPrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+            riskNote: 'PAPER MODE ONLY · Zero custody · 2.0s undo window.',
+            signalId: signal.id,
+            coin: signal.coin,
+            source: 'tap',
+          },
+        )
+      }
+
+      list.push({
+        id: `act-tg-${now}`,
+        type: 'tg_share_signal',
+        label: `Post ${signal.coin} Alert -> Telegram Desk`,
+        headline: `POST ${signal.coin} ALERT -> TELEGRAM`,
+        summary: alertText,
+        riskNote: 'Read-only market alert · Tap arms 2.0s undo countdown.',
+        signalId: signal.id,
+        telegramText: alertText,
+        source: 'tap',
+      })
+
+      return list
     }
 
     if (signal.kind === 'polymarket') {
+      const stakeUsd = this.getPmStakeSizeUsd()
       const yesCents = Math.round((signal.bestAsk ?? signal.yesPrice) * 100)
       const noCents = Math.round(signal.noPrice * 100)
       const callText = `[PulseHUD G2] Polymarket "${signal.shortTitle}" — YES ${Math.round(signal.yesPrice * 100)}c (${signal.change24hCents >= 0 ? '+' : ''}${signal.change24hCents}c 24h)`
@@ -552,27 +787,37 @@ export class PulseHudController {
         {
           id: `act-yes-${now}`,
           type: 'pm_paper_yes',
-          label: `Paper Buy YES $50 @ ${yesCents}c`,
-          headline: `POLYMARKET PAPER YES $50`,
+          label: `Paper Buy YES $${stakeUsd} @ ${yesCents}c`,
+          headline: `POLYMARKET PAPER YES $${stakeUsd}`,
           summary: `${signal.shortTitle} @ ${yesCents}c live CLOB`,
-          riskNote: 'PAPER MODE ONLY · Live Polymarket odds · 1 tap confirms.',
+          riskNote: 'PAPER MODE ONLY · Live CLOB odds · 2.0s undo window.',
           signalId: signal.id,
           marketId: signal.marketId,
-          notionalUsd: 50,
+          notionalUsd: stakeUsd,
           limitPrice: signal.bestAsk ?? signal.yesPrice,
           source: 'tap',
         },
         {
           id: `act-no-${now}`,
           type: 'pm_paper_no',
-          label: `Paper Buy NO $50 @ ${noCents}c`,
-          headline: `POLYMARKET PAPER NO $50`,
+          label: `Paper Buy NO $${stakeUsd} @ ${noCents}c`,
+          headline: `POLYMARKET PAPER NO $${stakeUsd}`,
           summary: `${signal.shortTitle} — NO @ ${noCents}c`,
-          riskNote: 'PAPER MODE ONLY · Live Polymarket odds · 1 tap confirms.',
+          riskNote: 'PAPER MODE ONLY · Live CLOB odds · 2.0s undo window.',
           signalId: signal.id,
           marketId: signal.marketId,
-          notionalUsd: 50,
+          notionalUsd: stakeUsd,
           limitPrice: signal.noPrice,
+          source: 'tap',
+        },
+        {
+          id: `act-pmsize-${now}`,
+          type: 'pm_paper_yes',
+          label: `Stake Size: $${stakeUsd}  [Tap to Cycle $25/$50/$100/$250]`,
+          headline: 'CYCLE STAKE',
+          summary: '',
+          riskNote: '',
+          uiCommand: 'cycle_pm_size',
           source: 'tap',
         },
         {
@@ -581,7 +826,7 @@ export class PulseHudController {
           label: 'Share Odds Call -> Telegram Desk',
           headline: 'SHARE ODDS -> TELEGRAM DESK',
           summary: callText,
-          riskNote: '1 tap delivers formatted odds call to Telegram Desk.',
+          riskNote: 'Tap arms 2.0s undo countdown before Telegram post.',
           signalId: signal.id,
           telegramText: callText,
           source: 'tap',
@@ -589,19 +834,73 @@ export class PulseHudController {
       ]
     }
 
-    // Telegram Desk smart drafts
-    return signal.smartDrafts.slice(0, 3).map((draft, idx) => ({
+    // Telegram Desk smart drafts + Coin-Locked TG->Trade jump & direct hedge!
+    const tgActions: StagedAction[] = signal.smartDrafts.slice(0, 3).map((draft, idx) => ({
       id: `act-tgdraft-${idx}-${now}`,
       type: 'tg_reply',
       label: draft,
       headline: `TG REPLY -> ${signal.chatName}`,
       summary: `"${draft}"`,
-      riskNote: `Replying to ${signal.sender} · 1 tap sends to Telegram.`,
+      riskNote: `Replying to ${signal.sender} · Tap arms 2.0s undo countdown.`,
       signalId: signal.id,
       telegramChatId: signal.chatId,
       telegramText: draft,
       source: 'tap',
     }))
+
+    if (signal.linkedCoin) {
+      const coin = signal.linkedCoin
+      const hlMarket = this.state.hyperliquid.find((s) => s.coin === coin)
+      const sizeUsd = this.getHlOrderSizeUsd()
+      const px = hlMarket ? (hlMarket.bestBid ?? hlMarket.markPx) : 0
+
+      tgActions.push({
+        id: `act-coinlock-jump-${now}`,
+        type: 'hl_paper_short',
+        label: `[COIN-LOCK] Open ${coin}-PERP Trade Controls ->`,
+        headline: `TRADE ${coin}-PERP`,
+        summary: '',
+        riskNote: '',
+        coin,
+        uiCommand: 'jump_coin_trade',
+        source: 'tap',
+      })
+
+      if (hlMarket) {
+        tgActions.push({
+          id: `act-coinlock-hedge-${now}`,
+          type: 'hl_paper_short',
+          label: `[COIN-LOCK] 1-Tap Paper Short $${sizeUsd.toLocaleString('en-US')} ${coin}`,
+          headline: `TG->TRADE PAPER SHORT ${coin}`,
+          summary: `Coin-locked from ${signal.sender}: $${sizeUsd.toLocaleString('en-US')} ${coin} @ $${px.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+          riskNote: 'PAPER MODE ONLY · Coin-locked TG->Trade · 2.0s undo window.',
+          signalId: hlMarket.id,
+          coin,
+          notionalUsd: sizeUsd,
+          limitPrice: px,
+          source: 'tap',
+        })
+      }
+    }
+
+    return tgActions
+  }
+
+  private async pushImages(page: BuiltHudPage, forceAll: boolean): Promise<void> {
+    if (!this.bridge || page.imageSlots.length === 0) return
+    for (const img of page.imageSlots) {
+      if (!forceAll && this.lastRenderedImages.get(img.containerID) === img.fingerprint) {
+        continue
+      }
+      await this.bridge.updateImageRawData(
+        new ImageRawDataUpdate({
+          containerID: img.containerID,
+          containerName: img.containerName,
+          imageData: Array.from(img.pngBytes),
+        }),
+      )
+      this.lastRenderedImages.set(img.containerID, img.fingerprint)
+    }
   }
 
   private async syncDisplay(forceStartup: boolean): Promise<void> {
@@ -623,9 +922,11 @@ export class PulseHudController {
           this.pageInitialized = true
           this.currentLayoutKey = page.layoutKey
           this.lastRenderedContents.clear()
+          this.lastRenderedImages.clear()
           for (const slot of page.slots) {
             this.lastRenderedContents.set(slot.containerID, `${slot.textColor}:${slot.content}`)
           }
+          await this.pushImages(page, true)
         } else {
           console.error('[PulseHUD] createStartUpPageContainer returned error code:', res)
         }
@@ -637,14 +938,16 @@ export class PulseHudController {
         if (ok) {
           this.currentLayoutKey = page.layoutKey
           this.lastRenderedContents.clear()
+          this.lastRenderedImages.clear()
           for (const slot of page.slots) {
             this.lastRenderedContents.set(slot.containerID, `${slot.textColor}:${slot.content}`)
           }
+          await this.pushImages(page, true)
         }
         return
       }
 
-      // Same layout geometry -> flicker-free in-place textContainerUpgrade calls!
+      // Same layout geometry -> flicker-free in-place textContainerUpgrade + updateImageRawData!
       for (const slot of page.slots) {
         const fingerprint = `${slot.textColor}:${slot.content}`
         if (this.lastRenderedContents.get(slot.containerID) === fingerprint) continue
@@ -658,6 +961,8 @@ export class PulseHudController {
         )
         this.lastRenderedContents.set(slot.containerID, fingerprint)
       }
+
+      await this.pushImages(page, false)
     })
 
     await this.renderQueue

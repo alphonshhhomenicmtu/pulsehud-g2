@@ -52,10 +52,10 @@ function cleanup() {
 }
 
 const hardWatchdog = setTimeout(() => {
-  console.error('[verify] Hard 45s watchdog triggered — force killing all children.')
+  console.error('[verify] Hard 65s watchdog triggered — force killing all children.')
   cleanup()
   process.exit(1)
-}, 45_000)
+}, 65_000)
 
 async function sleep(ms) {
   await new Promise((r) => setTimeout(r, ms))
@@ -234,7 +234,9 @@ async function saveShot(endpoint, filename, compositeDark = true) {
     await writeFile(resolve(RAW_DIR, filename), rawBuf)
     const composited = compositeRgbaPngOverDarkLens(rawBuf)
     await writeFile(resolve(SHOT_DIR, filename), composited)
-    console.log(`[verify] Saved ${filename} (raw ${rawBuf.byteLength}B, dark-lens ${composited.byteLength}B)`)
+    console.log(
+      `[verify] Saved ${filename} (raw ${rawBuf.byteLength}B, dark-lens ${composited.byteLength}B)`,
+    )
   } else {
     await writeFile(resolve(SHOT_DIR, filename), rawBuf)
     console.log(`[verify] Saved ${filename} (${rawBuf.byteLength}B)`)
@@ -254,16 +256,23 @@ async function getConsoleEntries() {
 
 let exitCode = 0
 try {
-  // Clean previous screenshots so directory only contains current verified captures
   await rm(SHOT_DIR, { recursive: true, force: true })
   await mkdir(RAW_DIR, { recursive: true })
 
-  console.log('[verify] Starting PulseHUD backend server...')
+  console.log('[verify] Starting PulseHUD v2 backend server...')
   spawnProc('server', 'npx', ['tsx', 'server/index.ts'])
-  await waitForUrl(`${API_URL}/api/health`, (txt) => txt.includes('"ok":true'), 18000)
+  await waitForUrl(`${API_URL}/api/health`, (txt) => txt.includes('"ok":true'), 22000)
 
   const initialState = await (await fetch(`${API_URL}/api/state`)).json()
   console.log('[verify] Live API initial sync:', JSON.stringify(initialState.health, null, 2))
+  console.log(
+    '[verify] Watched HL wallet:',
+    initialState.watchedWallet?.address,
+    'status=',
+    initialState.watchedWallet?.status,
+    'positions=',
+    initialState.watchedWallet?.positions?.length,
+  )
 
   console.log('[verify] Starting Vite dev server...')
   spawnProc('vite', 'npx', ['vite', '--host', '127.0.0.1', '--port', '5178'])
@@ -295,65 +304,73 @@ try {
     throw new Error('PulseHUD did not emit Ready log inside evenhub-simulator')
   }
 
-  await sleep(800)
+  await sleep(1100)
 
-  // 01: Live Hyperliquid Perp card
-  await saveShot('/api/screenshot/glasses', '01-feed-hyperliquid.png')
+  // 01: Borderless 15m Hyperliquid Candlestick HUD (updateImageRawData)
+  await saveShot('/api/screenshot/glasses', '01-feed-hyperliquid-15m-candles.png')
 
-  // 02: Swipe down -> Live Polymarket CLOB Odds card
-  await simInput('down', 650)
-  await saveShot('/api/screenshot/glasses', '02-feed-polymarket.png')
+  // 02: Swipe down -> Live Polymarket CLOB 24h Sparkline HUD (updateImageRawData)
+  await simInput('down', 850)
+  await saveShot('/api/screenshot/glasses', '02-feed-polymarket-sparkline.png')
 
-  // 03: Swipe down -> Telegram Desk unread alert card
-  await simInput('down', 650)
-  await saveShot('/api/screenshot/glasses', '03-feed-telegram.png')
+  // 03: Swipe down -> Coin-Locked Telegram Desk alert card
+  await simInput('down', 750)
+  await saveShot('/api/screenshot/glasses', '03-feed-telegram-coinlock.png')
 
-  // 04: Tap -> Telegram 3 Context-Aware Smart Reply Drafts
-  await simInput('click', 700)
-  await saveShot('/api/screenshot/glasses', '04-actions-telegram-drafts.png')
+  // 04: Tap -> Telegram 3 Smart Replies + Coin-Lock Trade BTC jump
+  await simInput('click', 750)
+  await saveShot('/api/screenshot/glasses', '04-actions-telegram-coinlock.png')
 
-  // 05: Tap -> Safety Confirmation Gate for Telegram Reply
-  await simInput('click', 700)
+  // 05: Tap -> Confirm Gate (Standby with 2.0s Safe Ring)
+  await simInput('click', 750)
   await saveShot('/api/screenshot/glasses', '05-confirm-telegram-reply.png')
 
-  // 06: Tap -> Execute & Deliver Reply -> Toast feedback on Feed
-  await simInput('click', 850)
-  await saveShot('/api/screenshot/glasses', '06-executed-toast-feed.png')
+  // 06: Tap -> ARMED 2.0s Countdown Ring! Capture live mid-countdown (~450ms in)
+  await simInput('click', 450)
+  await saveShot('/api/screenshot/glasses', '06-armed-undo-countdown-ring.png')
 
-  // 07: Swipe up twice back to Hyperliquid BTC-PERP -> Tap -> Write Actions
-  await simInput('up', 500)
-  await simInput('up', 500)
+  // Wait remainder of 2.0s window + IPC flush -> commits TG reply cleanly -> Feed Toast
+  await sleep(2900)
+  await saveShot('/api/screenshot/glasses', '07-executed-toast-feed.png')
+
+  // 08: Swipe up twice back to Hyperliquid BTC-PERP -> Tap -> Dynamic Size + Partial 50% + BE Actions
+  await simInput('up', 650)
+  await simInput('up', 650)
+  await simInput('click', 750)
+  await saveShot('/api/screenshot/glasses', '08-actions-hyperliquid-controls.png')
+
+  // Tap index 0 (Paper Short $1,000 BTC) -> Confirm Gate -> Tap to Arm -> Wait 2.9s to Commit Paper Short
   await simInput('click', 700)
-  await saveShot('/api/screenshot/glasses', '07-actions-hyperliquid-trade.png')
+  await simInput('click', 2900)
 
-  // 08: Tap -> Safety Confirmation Gate for Hyperliquid Paper Short
-  await simInput('click', 700)
-  await saveShot('/api/screenshot/glasses', '08-confirm-hyperliquid-paper-trade.png')
-
-  // Execute Hyperliquid Paper Short
-  await simInput('click', 850)
-
-  // 09: Open Native G2 OS Contextual Menu -> Capture menu overlay
+  // 09: Open Native G2 OS Contextual Menu -> Capture overlay
   await simInput('context_menu', 850)
   await saveShot('/api/screenshot/glasses', '09-context-menu-overlay.png')
 
-  // Select "Paper Portfolio" from the native OS contextual menu:
-  // Simulator menu starts on item 0 ("All Signals"), so "Paper Portfolio" is 4 down presses away.
+  // Select "HL Wallet Watch" (item index 4: All, HL, PM, TG, HL Wallet Watch)
   for (let i = 0; i < 4; i += 1) {
     await simInput('down', 280)
   }
+  await simInput('click', 1000)
+  await saveShot('/api/screenshot/glasses', '10-wallet-watcher-clearinghouse.png')
+
+  // Open Context Menu -> Select "Paper Portfolio" (item index 5)
+  await simInput('context_menu', 750)
+  for (let i = 0; i < 5; i += 1) {
+    await simInput('down', 280)
+  }
   await simInput('click', 850)
-  await saveShot('/api/screenshot/glasses', '10-portfolio-ledger.png')
+  await saveShot('/api/screenshot/glasses', '11-portfolio-ledger.png')
 
-  // 11: Companion WebView screenshot (native macOS WKWebView capture)
-  await saveShot('/api/screenshot/webview', '11-companion-webview.png', false)
+  // 12: Companion WebView screenshot (native macOS WKWebView capture)
+  await saveShot('/api/screenshot/webview', '12-companion-webview.png', false)
 
-  // Also test live /api/voice/command & /api/telegram/inbound endpoints end-to-end
+  // End-to-end API checks (voice, coin-locked inbound TG, public wallet watch)
   const voiceRes = await (
     await fetch(`${API_URL}/api/voice/command`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript: 'Buy 50 yes BTC' }),
+      body: JSON.stringify({ transcript: 'Take 50% BTC' }),
       signal: AbortSignal.timeout(5000),
     })
   ).json()
@@ -371,7 +388,9 @@ try {
     })
   ).json()
 
-  const finalState = await (await fetch(`${API_URL}/api/state`, { signal: AbortSignal.timeout(5000) })).json()
+  const finalState = await (
+    await fetch(`${API_URL}/api/state`, { signal: AbortSignal.timeout(5000) })
+  ).json()
   const consoleEntries = await getConsoleEntries()
   const errors = consoleEntries.filter((e) => {
     const lvl = String(e.level ?? '').toLowerCase()
@@ -381,6 +400,7 @@ try {
 
   const report = {
     verifiedAt: new Date().toISOString(),
+    version: '2.0.0',
     simulatorVersion: '0.9.5',
     sdkVersion: '0.0.16',
     bridgeMode,
@@ -393,23 +413,24 @@ try {
           change24hPct: finalState.hyperliquid[0].change24hPct,
           fundingAprPct: finalState.hyperliquid[0].fundingAprPct,
           spreadBps: finalState.hyperliquid[0].spreadBps,
+          candles15mCount: finalState.hyperliquid[0].candles15m?.length ?? 0,
         }
       : null,
     polymarketCount: finalState.polymarket.length,
-    polymarketTop: finalState.polymarket[0]
-      ? {
-          shortTitle: finalState.polymarket[0].shortTitle,
-          yesPrice: finalState.polymarket[0].yesPrice,
-          clobMidpoint: finalState.polymarket[0].clobMidpoint,
-          spreadCents: finalState.polymarket[0].spreadCents,
-        }
-      : null,
+    watchedWallet: {
+      address: finalState.watchedWallet?.address,
+      status: finalState.watchedWallet?.status,
+      accountValueUsd: finalState.watchedWallet?.accountValueUsd,
+      marginRatioPct: finalState.watchedWallet?.marginRatioPct,
+      positionsCount: finalState.watchedWallet?.positions?.length ?? 0,
+    },
     voiceIntentTest: {
       transcript: voiceRes.transcript,
       stagedHeadline: voiceRes.stagedAction?.headline ?? null,
     },
     telegramInboundTest: {
       ok: inboundTg.ok,
+      linkedCoin: inboundTg.message?.linkedCoin ?? null,
       smartDraftCount: inboundTg.message?.smartDrafts?.length ?? 0,
     },
     executedReceipts: finalState.portfolio.receipts,
@@ -435,7 +456,7 @@ try {
     throw new Error(`Expected >= 2 confirmed write receipts, got ${finalState.portfolio.receipts.length}`)
   }
 
-  console.log('[verify] ALL SIMULATOR CHECKS PASSED WITH ZERO ERRORS & ZERO MISSING GLYPHS!')
+  console.log('[verify] ALL V2 SIMULATOR CHECKS PASSED WITH ZERO ERRORS & ZERO MISSING GLYPHS!')
 } catch (err) {
   console.error('[verify] FAILED:', err)
   exitCode = 1

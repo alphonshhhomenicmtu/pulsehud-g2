@@ -1,7 +1,7 @@
-node_modules/
-dist/
+node_modules
+dist
+dist-pages
 .env
-.env.local
-*.ehpk
 *.log
 .DS_Store
+demo-video

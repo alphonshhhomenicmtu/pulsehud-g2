@@ -2,6 +2,15 @@ export type FeedSourceStatus = 'live' | 'replay' | 'error'
 
 export type HudChannel = 'all' | 'hyperliquid' | 'polymarket' | 'telegram'
 
+export interface OhlcCandle {
+  t: number
+  o: number
+  h: number
+  l: number
+  c: number
+  v: number
+}
+
 export interface HyperliquidPerpSignal {
   id: string
   kind: 'hyperliquid'
@@ -16,6 +25,7 @@ export interface HyperliquidPerpSignal {
   bestBid: number | null
   bestAsk: number | null
   spreadBps: number | null
+  candles15m: OhlcCandle[]
   alertTag: string
   updatedAt: number
 }
@@ -36,6 +46,7 @@ export interface PolymarketOddsSignal {
   spreadCents: number | null
   change24hCents: number
   volume24hUsd: number
+  sparkline24h: number[]
   alertTag: string
   updatedAt: number
 }
@@ -52,6 +63,7 @@ export interface TelegramMessageSignal {
   origin: 'telegram_bot' | 'desk_bridge'
   repliedText?: string
   repliedAt?: number
+  linkedCoin?: string
   smartDrafts: string[]
 }
 
@@ -60,9 +72,41 @@ export type SignalCard =
   | PolymarketOddsSignal
   | TelegramMessageSignal
 
+export interface WatchedWalletPosition {
+  coin: string
+  side: 'LONG' | 'SHORT'
+  size: number
+  leverage: number
+  leverageType: 'cross' | 'isolated'
+  entryPx: number
+  markPx: number
+  positionValueUsd: number
+  unrealizedPnlUsd: number
+  returnOnEquityPct: number
+  liquidationPx: number | null
+  liqDistancePct: number | null
+  cumFundingUsd: number
+}
+
+export interface WatchedWalletSnapshot {
+  address: string
+  label: string
+  status: 'live' | 'empty' | 'replay' | 'error'
+  accountValueUsd: number
+  totalMarginUsedUsd: number
+  marginRatioPct: number
+  totalUnrealizedPnlUsd: number
+  withdrawableUsd: number
+  positions: WatchedWalletPosition[]
+  updatedAt: number
+  error?: string
+}
+
 export type ActionType =
   | 'hl_paper_long'
   | 'hl_paper_short'
+  | 'hl_partial_close'
+  | 'hl_move_sl_be'
   | 'hl_flatten'
   | 'pm_paper_yes'
   | 'pm_paper_no'
@@ -82,8 +126,11 @@ export interface StagedAction {
   marketId?: string
   notionalUsd?: number
   limitPrice?: number
+  closeFraction?: number
   telegramChatId?: string
   telegramText?: string
+  /** Optional non-destructive HUD action executed immediately without opening Confirm Gate. */
+  uiCommand?: 'cycle_hl_size' | 'cycle_pm_size' | 'jump_coin_trade'
   source: 'tap' | 'voice' | 'menu'
 }
 
@@ -98,6 +145,8 @@ export interface PaperPosition {
   notionalUsd: number
   unrealizedPnlUsd: number
   unrealizedPnlPct: number
+  stopLossPx?: number | null
+  stopLossMode?: 'breakeven' | 'custom' | null
   openedAt: number
 }
 
@@ -126,6 +175,7 @@ export interface FeedHealth {
     status: FeedSourceStatus
     latencyMs: number | null
     lastSyncAt: number | null
+    candlesLoaded?: boolean
     error?: string
   }
   polymarket: {
@@ -155,6 +205,7 @@ export interface PulseStateSnapshot {
   hyperliquid: HyperliquidPerpSignal[]
   polymarket: PolymarketOddsSignal[]
   telegram: TelegramMessageSignal[]
+  watchedWallet: WatchedWalletSnapshot
   portfolio: PortfolioSnapshot
 }
 

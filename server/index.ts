@@ -5,7 +5,6 @@ import type { ExecuteActionRequest, VoiceCommandResponse } from '../shared/types
 import { MarketHub } from './feeds/marketHub.js'
 import { detectSttProvider, parseVoiceIntent, transcribeGlassesAudio } from './voice/intent.js'
 
-// Lightweight .env loader (no extra dependency required)
 function loadDotEnv(): void {
   const envPath = resolve(process.cwd(), '.env')
   if (!existsSync(envPath)) return
@@ -114,6 +113,17 @@ const server = createServer(async (req, res) => {
       return
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/wallet/watch') {
+      const body = await readJsonBody<{ address?: string; label?: string }>(req)
+      if (!body?.address?.trim()) {
+        sendJson(res, 400, { ok: false, error: 'Public 0x address is required' })
+        return
+      }
+      const state = await hub.setWatchedWallet(body.address, body.label)
+      sendJson(res, 200, { ok: true, state })
+      return
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/actions/execute') {
       const body = await readJsonBody<ExecuteActionRequest>(req)
       if (!body?.action?.type) {
@@ -157,7 +167,7 @@ const server = createServer(async (req, res) => {
       const snap = hub.getSnapshot()
       let transcript = (body.transcript ?? '').trim()
       let provider = detectSttProvider()
-      let notice = 'Parsed spoken intent — confirm with 1 tap on G2'
+      let notice = 'Parsed spoken intent — tap arms 2.0s undo window on G2'
       let audioBytes: number | undefined
       let durationMs: number | undefined
 
@@ -182,7 +192,7 @@ const server = createServer(async (req, res) => {
         : null
 
       if (transcript && !stagedAction) {
-        notice = `Heard "${transcript}" — try "Paper short 1000 BTC", "Buy 50 yes BTC", or "Reply: hedging now"`
+        notice = `Heard "${transcript}" — try "Paper short 1000 BTC", "Take 50% BTC", "Move BTC stop to breakeven", or "Reply: hedging now"`
       }
 
       const response: VoiceCommandResponse = {
@@ -210,7 +220,7 @@ await hub.start()
 server.listen(PORT, '127.0.0.1', () => {
   const snap = hub.getSnapshot()
   console.log(
-    `[PulseHUD Server] Listening on http://127.0.0.1:${PORT} | HL=${snap.health.hyperliquid.status} (${snap.hyperliquid.length}) | PM=${snap.health.polymarket.status} (${snap.polymarket.length}, clob=${snap.health.polymarket.clobVerified}) | TG=${snap.health.telegram.mode} (${snap.telegram.length})`,
+    `[PulseHUD Server v2] Listening on http://127.0.0.1:${PORT} | HL=${snap.health.hyperliquid.status} (${snap.hyperliquid.length}, candles=${snap.health.hyperliquid.candlesLoaded}) | PM=${snap.health.polymarket.status} (${snap.polymarket.length}, clob=${snap.health.polymarket.clobVerified}) | WATCH=${snap.watchedWallet.status} (${snap.watchedWallet.positions.length} pos) | TG=${snap.health.telegram.mode} (${snap.telegram.length})`,
   )
 })
 
