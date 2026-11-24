@@ -1,0 +1,103 @@
+{
+  "verifiedAt": "2026-11-24T02:16:22.610Z",
+  "simulatorVersion": "0.9.5",
+  "sdkVersion": "0.0.16",
+  "bridgeMode": "even-g2",
+  "health": {
+    "hyperliquid": {
+      "status": "live",
+      "latencyMs": 2080,
+      "lastSyncAt": 1795486577226
+    },
+    "polymarket": {
+      "status": "live",
+      "latencyMs": 3067,
+      "lastSyncAt": 1795486577226,
+      "clobVerified": true
+    },
+    "telegram": {
+      "mode": "desk_bridge",
+      "botUsername": null,
+      "chatIdConfigured": false,
+      "unreadCount": 3,
+      "lastSyncAt": 1795486582606
+    },
+    "stt": {
+      "provider": "local_command"
+    }
+  },
+  "hyperliquidCount": 5,
+  "hyperliquidTop": {
+    "coin": "BTC",
+    "markPx": 60782,
+    "change24hPct": -0.07,
+    "fundingAprPct": 5.8,
+    "spreadBps": 0.16
+  },
+  "polymarketCount": 5,
+  "polymarketTop": {
+    "shortTitle": "Fed increase rates by 25 bps at Dec FOMC?",
+    "yesPrice": 0.935,
+    "clobMidpoint": 0.935,
+    "spreadCents": 1
+  },
+  "voiceIntentTest": {
+    "transcript": "Buy 50 yes BTC",
+    "stagedHeadline": "POLYMARKET PAPER YES $50"
+  },
+  "telegramInboundTest": {
+    "ok": true,
+    "smartDraftCount": 3
+  },
+  "executedReceipts": [
+    {
+      "id": "rcpt-1795486578670",
+      "timestamp": 1795486578670,
+      "type": "hl_paper_short",
+      "title": "PAPER SHORT BTC",
+      "detail": "0.01645 BTC @ $60,800 ($1000 notional)",
+      "venue": "hyperliquid-paper",
+      "deliveredExternal": false
+    },
+    {
+      "id": "rcpt-1795486575278",
+      "timestamp": 1795486575278,
+      "type": "tg_reply",
+      "title": "TG REPLY SENT",
+      "detail": "Telegram Desk Bridge: \"Copy — hedging 25% BTC @ $60,842 (+5.8% APR).\"",
+      "venue": "telegram",
+      "deliveredExternal": false
+    }
+  ],
+  "positions": [
+    {
+      "id": "pos-hl-btc",
+      "venue": "hyperliquid",
+      "symbol": "BTC-PERP",
+      "side": "LONG",
+      "size": 0.02497,
+      "entryPrice": 60354.87,
+      "markPrice": 60782,
+      "notionalUsd": 1517.73,
+      "unrealizedPnlUsd": 10.67,
+      "unrealizedPnlPct": 0.71,
+      "openedAt": 1795484044144
+    },
+    {
+      "id": "pos-pm-3215008",
+      "venue": "polymarket",
+      "symbol": "Fed increase rates by 25 bps at Dec FOMC?",
+      "side": "YES",
+      "size": 134.08,
+      "entryPrice": 0.895,
+      "markPrice": 0.935,
+      "notionalUsd": 125.36,
+      "unrealizedPnlUsd": 5.36,
+      "unrealizedPnlPct": 4.47,
+      "openedAt": 1795485064144
+    }
+  ],
+  "lvglMissingGlyphCount": 0,
+  "consoleErrorCount": 0,
+  "consoleErrors": []
+}

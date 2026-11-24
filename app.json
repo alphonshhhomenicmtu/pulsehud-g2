@@ -1,0 +1,22 @@
+{
+  "package_id": "io.pulsehud.eveng2",
+  "edition": "202601",
+  "name": "PulseHUD",
+  "version": "1.0.0",
+  "min_app_version": "2.2.10",
+  "min_sdk_version": "0.0.16",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Connects to the PulseHUD companion backend for live Hyperliquid perps, Polymarket odds, Telegram Desk sync, and voice transcription.",
+      "whitelist": [
+        "http://127.0.0.1:8792",
+        "http://localhost:8792",
+        "http://127.0.0.1:5178",
+        "http://localhost:5178"
+      ]
+    }
+  ],
+  "supported_languages": ["en"]
+}

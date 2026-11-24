@@ -1,0 +1,33 @@
+{
+  "name": "pulsehud-g2",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Glanceable real-time Crypto, DeFi, Prediction Markets & Telegram Read-and-Write HUD for Even Realities G2 smart glasses",
+  "scripts": {
+    "dev:server": "tsx watch server/index.ts",
+    "dev:web": "vite",
+    "dev": "concurrently -n server,web -c cyan,green \"npm run dev:server\" \"npm run dev:web\"",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 5178",
+    "simulate": "evenhub-simulator http://127.0.0.1:5178 --automation-port 9898",
+    "pack": "npm run build && evenhub pack app.json dist -o pulsehud-g2.ehpk",
+    "verify:sim": "node scripts/verify-simulator.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.16",
+    "@evenrealities/pretext": "^0.1.4"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.2.0",
+    "@evenrealities/evenhub-simulator": "^0.9.5",
+    "@types/node": "^22.20.5",
+    "concurrently": "^9.2.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.6",
+    "vitest": "^3.2.7"
+  }
+}
