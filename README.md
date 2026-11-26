@@ -4,6 +4,7 @@
 [![1080p Simulator Demo Video](https://img.shields.io/badge/1080p_v2.2_Demo_Video-YouTube-ff0000?style=for-the-badge&logo=youtube)](https://www.youtube.com/watch?v=EHzgFv-Iw2o)
 
 - **Watch the 1080p Official Simulator Demo (`v2.2`, 2m 33s):** **[https://www.youtube.com/watch?v=EHzgFv-Iw2o](https://www.youtube.com/watch?v=EHzgFv-Iw2o)**
+- **Judge & TVM Ventures Pitch Deck (PDF):** **[https://alphonshhhomenicmtu.github.io/pulsehud-g2/pulsehud-deck.pdf](https://alphonshhhomenicmtu.github.io/pulsehud-g2/pulsehud-deck.pdf)** (`docs/pulsehud-deck.pdf`)
 - **Try PulseHUD in your browser (no install, no glasses required):** **[https://alphonshhhomenicmtu.github.io/pulsehud-g2/](https://alphonshhhomenicmtu.github.io/pulsehud-g2/)** — interactive 576×288 4-bit monochrome green Even G2 preview hitting live public Hyperliquid and Polymarket APIs directly, with clickable R1 ring / temple controls, keyboard shortcuts (`↑/↓` Scroll, `Enter` Tap, `Esc` Undo/Back, `M` OS Context Menu), proactive liq/funding/odds threshold alerts, nearest-liquidation `clearinghouseState` watcher, Coin-Locked Telegram-to-Trade, zero-key local STT fallback, and the commit-locked 2.0-second Arm/Undo Countdown Ring.
 
 **PulseHUD** is a Read-and-Write companion app built for **Even Realities G2** smart glasses (`@evenrealities/even_hub_sdk@0.0.16`, `@evenrealities/pretext@0.1.4`, verified in `@evenrealities/evenhub-simulator@0.9.5`).
