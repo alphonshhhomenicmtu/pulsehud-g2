@@ -9,7 +9,7 @@ import type {
 } from '../../shared/types.js'
 import { PaperLedger } from '../engine/paperLedger.js'
 import { TelegramBridge, formatDigestText } from '../telegram/bridge.js'
-import { detectSttProvider } from '../voice/intent.js'
+import { detectRuntimeSttProvider } from '../voice/localStt.js'
 import {
   createFallbackHyperliquidSignals,
   createFallbackPolymarketSignals,
@@ -51,7 +51,7 @@ export class MarketHub {
       unreadCount: 0,
       lastSyncAt: null,
     },
-    stt: { provider: detectSttProvider() },
+    stt: { provider: detectRuntimeSttProvider() },
   }
 
   constructor() {
@@ -243,7 +243,7 @@ export class MarketHub {
       await this.telegram.pollLiveTelegram(this.hlSignals, this.pmSignals, this.ledger.snapshot())
 
       this.health.telegram = this.telegram.getHealth()
-      this.health.stt.provider = detectSttProvider()
+      this.health.stt.provider = detectRuntimeSttProvider()
       this.broadcast()
     } finally {
       this.refreshing = false

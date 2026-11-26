@@ -23,7 +23,9 @@ import {
   renderWalletRiskBarTiles,
 } from '../src/hud/chartRaster.js'
 import { PulseHudController } from '../src/hud/controller.js'
-import { MENU_IDS } from '../src/hud/layout.js'
+import { evaluateThresholdAlerts } from '../src/hud/alerts.js'
+import { buildHudPage, MENU_IDS, toStartUpPageContainer } from '../src/hud/layout.js'
+import { validateEvenHubPageContainer } from '@evenrealities/even_hub_sdk'
 
 function makeState(): PulseStateSnapshot {
   const hl = createFallbackHyperliquidSignals(1_764_000_000_000)
@@ -549,5 +551,50 @@ describe('V2 Champion Upgrade: Graphics Rasterizer, clearinghouseState, Coin-Loc
         expect(result?.source).toBe('voice')
       }
     }
+  })
+
+  it('triggers proactive liq (<5%), funding (>=25% APR), and odds (>=5c) alert banners with 1-tap hedge staging and clean ack', async () => {
+    const state = makeState()
+    // 1. Default fallback has HYPE funding +27.2% APR (>=25%) and Polymarket +19.5c (>=5c), no liq <5% yet
+    const baseAlerts = evaluateThresholdAlerts(state, 1000, 50)
+    expect(baseAlerts.some((a) => a.kind === 'funding_extreme' && a.coin === 'HYPE')).toBe(true)
+    expect(baseAlerts.some((a) => a.kind === 'odds_swing')).toBe(true)
+    expect(baseAlerts[0].kind).toBe('funding_extreme')
+
+    // 2. Inject critical liquidation risk (<5%) -> MUST jump to top priority!
+    state.watchedWallet.positions[0] = {
+      ...state.watchedWallet.positions[0],
+      coin: 'BTC',
+      side: 'LONG',
+      liqDistancePct: 3.4,
+    }
+    const criticalAlerts = evaluateThresholdAlerts(state, 1000, 50)
+    expect(criticalAlerts[0].kind).toBe('liq_risk')
+    expect(criticalAlerts[0].severity).toBe('critical')
+    expect(criticalAlerts[0].bannerText).toContain('[ALERT]')
+    expect(criticalAlerts[0].bannerText).toContain('3.4%')
+    expect(criticalAlerts[0].action.type).toBe('hl_paper_short')
+
+    const ctrl = new PulseHudController(null, state)
+    const model = ctrl.getRenderModel()
+    expect(model.activeAlert?.kind).toBe('liq_risk')
+
+    // HUD page renders [ALERT] banner cleanly within SDK v0.0.16 bounds
+    const page = buildHudPage(model)
+    expect(page.slots[2].content).toContain('[ALERT]')
+    expect(page.slots[2].content).toContain('LIQ BTC 3.4%')
+    expect(validateEvenHubPageContainer(toStartUpPageContainer(page)).valid).toBe(true)
+
+    // 1-tap menu/alert action stages counter-hedge onto Confirm Gate (still requires 2.0s Arm/Undo!)
+    await ctrl.handleMenuSelection(MENU_IDS.ALERT_ACTION)
+    expect(ctrl.getRenderModel().screen).toBe('confirm')
+    expect(ctrl.getRenderModel().confirmPhase).toBe('idle')
+    expect(ctrl.getRenderModel().stagedAction?.headline).toContain('ALERT HEDGE BTC')
+
+    // Cancel and dismiss critical alert -> falls through cleanly to funding alert!
+    await ctrl.dispatchGesture({ kind: 'double_click' })
+    await ctrl.dismissActiveAlert()
+    expect(ctrl.getRenderModel().activeAlert?.kind).toBe('funding_extreme')
+    ctrl.destroy()
   })
 })

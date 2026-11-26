@@ -362,19 +362,30 @@ try {
   await simInput('click', 850)
   await saveShot('/api/screenshot/glasses', '11-portfolio-ledger.png')
 
-  // Verify Voice HUD screen renders cleanly with 0 missing LVGL glyphs (long_press -> double_click back)
-  await simInput('long_press', 700)
+  // 13: Capture Voice HUD screenshot (long_press -> verify 0 missing LVGL glyphs -> double_click back)
+  await simInput('long_press', 750)
+  await saveShot('/api/screenshot/glasses', '13-voice-hud.png')
   await simInput('double_click', 500)
 
   // 12: Companion WebView screenshot (native macOS WKWebView capture)
   await saveShot('/api/screenshot/webview', '12-companion-webview.png', false)
 
-  // End-to-end API checks (voice, coin-locked inbound TG, public wallet watch)
+  // End-to-end API checks (voice intent, zero-key PCM silence VAD gate, coin-locked inbound TG, public wallet watch)
   const voiceRes = await (
     await fetch(`${API_URL}/api/voice/command`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transcript: 'Take 50% BTC' }),
+      signal: AbortSignal.timeout(5000),
+    })
+  ).json()
+
+  const silentPcmBase64 = Buffer.alloc(3200).toString('base64')
+  const voicePcmRes = await (
+    await fetch(`${API_URL}/api/voice/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pcmBase64: silentPcmBase64 }),
       signal: AbortSignal.timeout(5000),
     })
   ).json()
@@ -404,7 +415,7 @@ try {
 
   const report = {
     verifiedAt: new Date().toISOString(),
-    version: '2.1.0',
+    version: '2.2.0',
     simulatorVersion: '0.9.5',
     sdkVersion: '0.0.16',
     bridgeMode,
@@ -431,6 +442,13 @@ try {
     voiceIntentTest: {
       transcript: voiceRes.transcript,
       stagedHeadline: voiceRes.stagedAction?.headline ?? null,
+    },
+    voicePcmVadTest: {
+      ok: voicePcmRes.ok,
+      provider: voicePcmRes.provider,
+      audioBytes: voicePcmRes.audioBytes,
+      stagedAction: voicePcmRes.stagedAction,
+      notice: voicePcmRes.notice,
     },
     telegramInboundTest: {
       ok: inboundTg.ok,

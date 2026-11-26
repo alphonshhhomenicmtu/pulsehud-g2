@@ -1,9 +1,9 @@
 {
   "name": "pulsehud-g2",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.2.0",
   "type": "module",
-  "description": "Glanceable DeFi, Polymarket & Telegram Read-and-Write HUD for Even Realities G2 smart glasses — 15m Hyperliquid candles, nearest-liquidation clearinghouseState watcher, coin-locked TG->Trade, and a commit-locked 2.0s Arm/Undo countdown ring",
+  "description": "Glanceable DeFi, Polymarket & Telegram Read-and-Write HUD for Even Realities G2 smart glasses — 15m Hyperliquid candles, proactive liq/funding/odds alerts, zero-key local STT fallback, coin-locked TG->Trade, and a commit-locked 2.0s Arm/Undo countdown ring",
   "scripts": {
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "vite",

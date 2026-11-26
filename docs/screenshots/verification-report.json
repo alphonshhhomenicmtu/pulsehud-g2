@@ -1,20 +1,20 @@
 {
-  "verifiedAt": "2026-11-24T12:46:22.891Z",
-  "version": "2.1.0",
+  "verifiedAt": "2026-11-26T13:53:36.534Z",
+  "version": "2.2.0",
   "simulatorVersion": "0.9.5",
   "sdkVersion": "0.0.16",
   "bridgeMode": "even-g2",
   "health": {
     "hyperliquid": {
       "status": "live",
-      "latencyMs": 3151,
-      "lastSyncAt": 1795524367643,
+      "latencyMs": 4095,
+      "lastSyncAt": 1795701211065,
       "candlesLoaded": true
     },
     "polymarket": {
       "status": "live",
-      "latencyMs": 5497,
-      "lastSyncAt": 1795524367643,
+      "latencyMs": 4758,
+      "lastSyncAt": 1795701211065,
       "clobVerified": true
     },
     "telegram": {
@@ -22,7 +22,7 @@
       "botUsername": null,
       "chatIdConfigured": false,
       "unreadCount": 3,
-      "lastSyncAt": 1795524382882
+      "lastSyncAt": 1795701216529
     },
     "stt": {
       "provider": "local_command"
@@ -31,23 +31,30 @@
   "hyperliquidCount": 5,
   "hyperliquidTop": {
     "coin": "BTC",
-    "markPx": 60442,
-    "change24hPct": -1.27,
-    "fundingAprPct": -1.2,
-    "spreadBps": 0.17,
+    "markPx": 60889.9,
+    "change24hPct": 4.88,
+    "fundingAprPct": -6.1,
+    "spreadBps": 0.16,
     "candles15mCount": 24
   },
   "polymarketCount": 5,
   "watchedWallet": {
     "address": "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
     "status": "live",
-    "accountValueUsd": 32514564.07,
-    "marginRatioPct": 29.54,
+    "accountValueUsd": 29262180.49,
+    "marginRatioPct": 31.36,
     "positionsCount": 12
   },
   "voiceIntentTest": {
     "transcript": "Take 50% BTC",
     "stagedHeadline": "PARTIAL 50% CLOSE BTC-PERP"
+  },
+  "voicePcmVadTest": {
+    "ok": true,
+    "provider": "local_command",
+    "audioBytes": 3200,
+    "stagedAction": null,
+    "notice": "No speech detected in G2 PCM capture (silence/noise gated — 0 writes). Hold & speak clearly, or use Companion Voice Bar."
   },
   "telegramInboundTest": {
     "ok": true,
@@ -56,20 +63,20 @@
   },
   "executedReceipts": [
     {
-      "id": "rcpt-1795524374416",
-      "timestamp": 1795524374416,
+      "id": "rcpt-1795701207965",
+      "timestamp": 1795701207965,
       "type": "hl_paper_short",
       "title": "PAPER SHORT BTC",
-      "detail": "0.01655 BTC @ $60,415 ($1000 notional)",
+      "detail": "0.01642 BTC @ $60,890 ($1000 notional)",
       "venue": "hyperliquid-paper",
       "deliveredExternal": false
     },
     {
-      "id": "rcpt-1795524368180",
-      "timestamp": 1795524368180,
+      "id": "rcpt-1795701201731",
+      "timestamp": 1795701201731,
       "type": "tg_reply",
       "title": "TG REPLY SENT",
-      "detail": "Telegram Desk Bridge: \"Copy — hedging 25% BTC @ $60,546 (-1.2% APR).\"",
+      "detail": "Telegram Desk Bridge: \"Copy — hedging 25% BTC @ $60,888 (-6.2% APR).\"",
       "venue": "telegram",
       "deliveredExternal": false
     }
@@ -80,30 +87,30 @@
       "venue": "hyperliquid",
       "symbol": "BTC-PERP",
       "side": "LONG",
-      "size": 0.02507,
-      "entryPrice": 60061.63,
-      "markPrice": 60442,
-      "notionalUsd": 1515.28,
-      "unrealizedPnlUsd": 9.54,
-      "unrealizedPnlPct": 0.63,
+      "size": 0.02497,
+      "entryPrice": 60401,
+      "markPrice": 60889.9,
+      "notionalUsd": 1520.42,
+      "unrealizedPnlUsd": 12.21,
+      "unrealizedPnlPct": 0.81,
       "stopLossPx": null,
       "stopLossMode": null,
-      "openedAt": 1795521832124
+      "openedAt": 1795698666288
     },
     {
-      "id": "pos-pm-3215008",
+      "id": "pos-pm-7279439",
       "venue": "polymarket",
-      "symbol": "Fed increase rates by 25 bps at Dec FOMC?",
+      "symbol": "ETH dip to $1,600 November 23-29?",
       "side": "YES",
-      "size": 134.08,
-      "entryPrice": 0.895,
-      "markPrice": 0.935,
-      "notionalUsd": 125.36,
-      "unrealizedPnlUsd": 5.36,
-      "unrealizedPnlPct": 4.47,
+      "size": 558.14,
+      "entryPrice": 0.215,
+      "markPrice": 0.255,
+      "notionalUsd": 142.33,
+      "unrealizedPnlUsd": 22.33,
+      "unrealizedPnlPct": 18.6,
       "stopLossPx": null,
       "stopLossMode": null,
-      "openedAt": 1795522852124
+      "openedAt": 1795699686288
     }
   ],
   "lvglMissingGlyphCount": 0,

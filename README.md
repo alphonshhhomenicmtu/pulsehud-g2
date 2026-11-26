@@ -1,8 +1,10 @@
-# PulseHUD v2.1 — Glanceable DeFi & Telegram HUD for Even Realities G2
+# PulseHUD v2.2 — Glanceable DeFi & Telegram HUD for Even Realities G2
 
 [![Live 576x288 Web G2 Simulator](https://img.shields.io/badge/Live_Browser_G2_Simulator-576x288_Interactive-45ff98?style=for-the-badge&logo=github)](https://alphonshhhomenicmtu.github.io/pulsehud-g2/)
+[![1080p Simulator Demo Video](https://img.shields.io/badge/1080p_v2.2_Demo_Video-YouTube-ff0000?style=for-the-badge&logo=youtube)](https://www.youtube.com/watch?v=EHzgFv-Iw2o)
 
-**Try PulseHUD in your browser (no install, no glasses required):** **[https://alphonshhhomenicmtu.github.io/pulsehud-g2/](https://alphonshhhomenicmtu.github.io/pulsehud-g2/)** — interactive 576×288 4-bit monochrome green Even G2 preview hitting live public Hyperliquid and Polymarket APIs directly, with clickable R1 ring / temple controls, keyboard shortcuts (`↑/↓` Scroll, `Enter` Tap, `Esc` Undo/Back, `M` OS Context Menu), nearest-liquidation `clearinghouseState` watcher, Coin-Locked Telegram-to-Trade, and the commit-locked 2.0-second Arm/Undo Countdown Ring.
+- **Watch the 1080p Official Simulator Demo (`v2.2`, 2m 33s):** **[https://www.youtube.com/watch?v=EHzgFv-Iw2o](https://www.youtube.com/watch?v=EHzgFv-Iw2o)**
+- **Try PulseHUD in your browser (no install, no glasses required):** **[https://alphonshhhomenicmtu.github.io/pulsehud-g2/](https://alphonshhhomenicmtu.github.io/pulsehud-g2/)** — interactive 576×288 4-bit monochrome green Even G2 preview hitting live public Hyperliquid and Polymarket APIs directly, with clickable R1 ring / temple controls, keyboard shortcuts (`↑/↓` Scroll, `Enter` Tap, `Esc` Undo/Back, `M` OS Context Menu), proactive liq/funding/odds threshold alerts, nearest-liquidation `clearinghouseState` watcher, Coin-Locked Telegram-to-Trade, zero-key local STT fallback, and the commit-locked 2.0-second Arm/Undo Countdown Ring.
 
 **PulseHUD** is a Read-and-Write companion app built for **Even Realities G2** smart glasses (`@evenrealities/even_hub_sdk@0.0.16`, `@evenrealities/pretext@0.1.4`, verified in `@evenrealities/evenhub-simulator@0.9.5`).
 
@@ -16,7 +18,20 @@ It brings **Hyperliquid perpetuals (15m OHLC candles, full 5-coin L2 quotes, and
 
 ---
 
-## What Changed in PulseHUD v2.1
+## What Changed in PulseHUD v2.2
+
+1. **Zero-Key Local STT Fallback + 30-Case Voice-Eval Suite (`server/voice/localStt.ts`, `server/voice/intent.ts`, `tests/voice-eval.test.ts`):**
+   - Adds a zero-dependency **16 kHz PCM Voice Activity Detection (VAD)** gate (`analyzePcmSpeech`) so silent or accidental temple long-presses never trigger phantom trades or waste STT calls.
+   - Adds zero-key local STT fallback (`LOCAL_STT_URL` for local `whisper.cpp` / faster-whisper servers, auto-detected `whisper-cli` / `whisper` binaries, and zero-key Browser Web Speech API + Voice Bar) while keeping optional `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` support on your own Node backend.
+   - Hardens `parseVoiceIntent` with negation/abort guards (`"Don't short BTC"`, `"Cancel that order"`), comma & `k`-shorthand amount parsing (`$1,500`, `2.5k`), and strict market-context matching so ambient `"yes"`/`"no"`/`"long day"` speech never false-triggers — verified by a dedicated **30-case voice-eval suite** (`65 / 65` total Vitest tests passing, **0 false executions**).
+2. **Proactive Liquidation / Funding / Odds Threshold Alert Banner (`src/hud/alerts.ts`, `src/hud/layout.ts`, `src/hud/controller.ts`, `src/companion/panel.ts`):**
+   - Continuously monitors live feeds for three actionable breaches: watched wallet **`liqDistancePct < 5%`** (critical priority), Hyperliquid **`|fundingAprPct| >= 25% APR`**, and Polymarket **`|change24hCents| >= 5c`**.
+   - Surfaces a crisp single-line `▲ [ALERT]` banner directly on the 576×288 G2 feed HUD (and in the Companion WebView) with 1-tap counter-hedge staging (still gated by the 2.0s Arm/Undo ring) and an **`Alert Hedge / Ack`** OS menu shortcut — staying within the `<= 999` byte and zero-scrollbar LVGL limits.
+3. **Captured Voice HUD QA (`docs/screenshots/13-voice-hud.png`), Fresh `.ehpk v2.2.0` & 1080p V2.2 Simulator Demo Video:**
+   - `npm run verify:sim` now captures `13-voice-hud.png` during `long_press` verification alongside `01..12` (**0 console errors**, **0 missing LVGL glyphs**).
+   - Repackaged `pulsehud-g2.ehpk` (`v2.2.0`, `min_app_version: 2.2.10`, SDK `0.0.16`) and rendered a refreshed 1080p V2.2 simulator demo video showcasing all 13 live captures.
+
+## Core Architecture (v2.1 + v2.2)
 
 1. **Commit-Locked 4-Phase 2.0s Arm/Undo State Machine (`src/hud/controller.ts`):**
    - Uses an explicit `phase: 'idle' | 'armed' | 'committing' | 'done'` state machine with a monotonic `commitId` guard.
@@ -65,6 +80,8 @@ Every HUD capture below was rendered by the LVGL engine inside `@evenrealities/e
 | ![G2 Context Menu](docs/screenshots/09-context-menu-overlay.png) | ![Hyperliquid Wallet Watcher](docs/screenshots/10-wallet-watcher-clearinghouse.png) |
 | **11. Demo Paper Book Ledger** | **12. Companion WebView Console (macOS WKWebView)** |
 | ![Demo Paper Portfolio Ledger](docs/screenshots/11-portfolio-ledger.png) | ![Companion WebView](docs/screenshots/12-companion-webview.png) |
+| **13. Voice Command HUD (G2 4-Mic 16 kHz PCM + Zero-Key Local STT)** | **Verified Simulator QA Report** |
+| ![Voice Command HUD](docs/screenshots/13-voice-hud.png) | `evenhub-simulator@0.9.5` · `0` console errors · `0` LVGL missing glyphs · `65/65` Vitest passing ([verification-report.json](docs/screenshots/verification-report.json)) |
 
 ---
 
@@ -172,7 +189,7 @@ npm run simulate
 npm run typecheck
 npm test
 
-# Build & package v2.1.0 Even Hub .ehpk bundle
+# Build & package v2.2.0 Even Hub .ehpk bundle
 npm run pack
 
 # Build static Browser 576x288 G2 Simulator for GitHub Pages

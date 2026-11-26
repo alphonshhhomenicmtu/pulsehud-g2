@@ -26,6 +26,7 @@ const CONTEXT_MENU_ITEMS: ReadonlyArray<{ id: number; label: string }> = [
   { id: MENU_IDS.WALLET_WATCH, label: 'HL Wallet Watch' },
   { id: MENU_IDS.PORTFOLIO, label: 'Paper Portfolio' },
   { id: MENU_IDS.SEND_DIGEST, label: 'Send Digest -> TG' },
+  { id: MENU_IDS.ALERT_ACTION, label: 'Alert Hedge / Ack' },
 ]
 
 interface BrowserSpeechRecognition {
@@ -63,8 +64,8 @@ export function mountCompanionPanel(
         <div class="brand">
           <span class="pulse-dot" id="sse-dot"></span>
           <div>
-            <h1>PulseHUD <span class="ver-pill">v2.1</span></h1>
-            <p class="subtitle">Even Realities G2 (576×288) · 15m Candles · Nearest-Liq Wallet Watch · Coin-Locked TG · 2.0s Undo Ring</p>
+            <h1>PulseHUD <span class="ver-pill">v2.2</span></h1>
+            <p class="subtitle">Even Realities G2 (576×288) · 15m Candles · Threshold Alerts · Zero-Key Local STT · 2.0s Undo Ring</p>
           </div>
         </div>
         <div class="top-badges">
@@ -94,6 +95,17 @@ export function mountCompanionPanel(
                 <div class="g2-menu-title">≡ EVEN G2 OS CONTEXT MENU</div>
                 <div class="g2-menu-items" id="g2-menu-items"></div>
               </div>
+            </div>
+          </div>
+
+          <div class="alert-banner hidden" id="proactive-alert-banner">
+            <div class="alert-copy">
+              <span class="alert-badge" id="alert-badge">ALERT</span>
+              <span class="alert-text" id="alert-text"></span>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-primary btn-pill" id="btn-alert-hedge">1-Tap Hedge -> G2 Gate</button>
+              <button type="button" class="btn btn-ghost btn-pill" id="btn-alert-ack">Ack</button>
             </div>
           </div>
 
@@ -369,6 +381,15 @@ export function mountCompanionPanel(
     controller.toggleBorderlessOptics()
   })
 
+  root.querySelector<HTMLButtonElement>('#btn-alert-hedge')!.addEventListener('click', () => {
+    menuOverlay.classList.add('hidden')
+    void controller.stageActiveAlertHedge()
+  })
+
+  root.querySelector<HTMLButtonElement>('#btn-alert-ack')!.addEventListener('click', () => {
+    void controller.dismissActiveAlert()
+  })
+
   root.querySelector<HTMLButtonElement>('#btn-refresh')!.addEventListener('click', async () => {
     const next = await triggerRefresh()
     controller.setState(next)
@@ -430,6 +451,9 @@ export function mountCompanionPanel(
   window.addEventListener('keydown', onKeyDown)
 
   const mirrorEl = root.querySelector<HTMLDivElement>('#g2-mirror')!
+  const alertBannerEl = root.querySelector<HTMLDivElement>('#proactive-alert-banner')!
+  const alertBadgeEl = root.querySelector<HTMLSpanElement>('#alert-badge')!
+  const alertTextEl = root.querySelector<HTMLSpanElement>('#alert-text')!
   const badgeBridge = root.querySelector<HTMLSpanElement>('#badge-bridge')!
   const badgeHl = root.querySelector<HTMLSpanElement>('#badge-hl')!
   const badgePm = root.querySelector<HTMLSpanElement>('#badge-pm')!
@@ -535,7 +559,21 @@ export function mountCompanionPanel(
     badgeTg.textContent = `TG: ${health.telegram.mode === 'live_bot' ? 'LIVE BOT' : 'DESK'} (${health.telegram.unreadCount})`
     badgeTg.className = `badge ${health.telegram.mode === 'live_bot' ? 'ok' : ''}`
 
-    sttChip.textContent = `STT: ${hasSpeechApi ? 'web-speech + local' : health.stt.provider}`
+    sttChip.textContent = `STT: ${hasSpeechApi ? `web-speech + ${health.stt.provider}` : health.stt.provider}`
+
+    if (model.activeAlert) {
+      alertBannerEl.classList.remove('hidden')
+      alertBannerEl.classList.toggle('critical', model.activeAlert.severity === 'critical')
+      alertBadgeEl.textContent =
+        model.activeAlert.kind === 'liq_risk'
+          ? 'LIQ < 5%'
+          : model.activeAlert.kind === 'funding_extreme'
+            ? 'FUND >= 25%'
+            : 'ODDS >= 5c'
+      alertTextEl.textContent = model.activeAlert.action.label
+    } else {
+      alertBannerEl.classList.add('hidden')
+    }
     tgModeChip.textContent =
       health.telegram.mode === 'live_bot'
         ? `@${health.telegram.botUsername ?? 'Bot'} Live`

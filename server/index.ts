@@ -3,7 +3,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { ExecuteActionRequest, VoiceCommandResponse } from '../shared/types.js'
 import { MarketHub } from './feeds/marketHub.js'
-import { detectSttProvider, parseVoiceIntent, transcribeGlassesAudio } from './voice/intent.js'
+import { parseVoiceIntent } from './voice/intent.js'
+import {
+  detectRuntimeSttProvider,
+  transcribeGlassesAudioWithFallback,
+} from './voice/localStt.js'
 
 function loadDotEnv(): void {
   const envPath = resolve(process.cwd(), '.env')
@@ -166,7 +170,7 @@ const server = createServer(async (req, res) => {
 
       const snap = hub.getSnapshot()
       let transcript = (body.transcript ?? '').trim()
-      let provider = detectSttProvider()
+      let provider = detectRuntimeSttProvider()
       let notice = 'Parsed spoken intent — tap arms 2.0s undo window on G2'
       let audioBytes: number | undefined
       let durationMs: number | undefined
@@ -175,7 +179,7 @@ const server = createServer(async (req, res) => {
         const pcm = Uint8Array.from(Buffer.from(body.pcmBase64, 'base64'))
         audioBytes = pcm.byteLength
         durationMs = Math.round((pcm.byteLength / 2 / 16000) * 1000)
-        const sttResult = await transcribeGlassesAudio(pcm)
+        const sttResult = await transcribeGlassesAudioWithFallback(pcm)
         transcript = sttResult.transcript
         provider = sttResult.provider
         notice = sttResult.notice
@@ -220,7 +224,7 @@ await hub.start()
 server.listen(PORT, '127.0.0.1', () => {
   const snap = hub.getSnapshot()
   console.log(
-    `[PulseHUD Server v2.1] Listening on http://127.0.0.1:${PORT} | HL=${snap.health.hyperliquid.status} (${snap.hyperliquid.length}, candles=${snap.health.hyperliquid.candlesLoaded}) | PM=${snap.health.polymarket.status} (${snap.polymarket.length}, clob=${snap.health.polymarket.clobVerified}) | WATCH=${snap.watchedWallet.status} (${snap.watchedWallet.positions.length} pos) | TG=${snap.health.telegram.mode} (${snap.telegram.length})`,
+    `[PulseHUD Server v2.2] Listening on http://127.0.0.1:${PORT} | HL=${snap.health.hyperliquid.status} (${snap.hyperliquid.length}, candles=${snap.health.hyperliquid.candlesLoaded}) | PM=${snap.health.polymarket.status} (${snap.polymarket.length}, clob=${snap.health.polymarket.clobVerified}) | WATCH=${snap.watchedWallet.status} (${snap.watchedWallet.positions.length} pos) | TG=${snap.health.telegram.mode} (${snap.telegram.length}) | STT=${snap.health.stt.provider}`,
   )
 })
 

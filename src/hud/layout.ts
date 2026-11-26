@@ -16,6 +16,7 @@ import type {
   SignalCard,
   StagedAction,
   TelegramMessageSignal,
+  ThresholdAlert,
   WatchedWalletPosition,
 } from '../../shared/types.js'
 import { shortenAddress } from '../../server/feeds/hyperliquid.js'
@@ -40,6 +41,7 @@ export const MENU_IDS = {
   WALLET_WATCH: 5,
   PORTFOLIO: 6,
   SEND_DIGEST: 7,
+  ALERT_ACTION: 8,
 } as const
 
 export type HudScreenKind = 'feed' | 'actions' | 'confirm' | 'voice' | 'wallet' | 'portfolio'
@@ -77,6 +79,7 @@ export interface HudRenderModel {
   voiceDurationMs: number
   voiceLevel: number
   voiceTick: number
+  activeAlert?: ThresholdAlert | null
   toast: string | null
 }
 
@@ -113,6 +116,7 @@ export function buildContextMenu(): MenuContainerProperty {
       new MenuItemProperty({ itemID: MENU_IDS.WALLET_WATCH, itemName: 'HL Wallet Watch' }),
       new MenuItemProperty({ itemID: MENU_IDS.PORTFOLIO, itemName: 'Paper Portfolio' }),
       new MenuItemProperty({ itemID: MENU_IDS.SEND_DIGEST, itemName: 'Send Digest -> TG' }),
+      new MenuItemProperty({ itemID: MENU_IDS.ALERT_ACTION, itemName: 'Alert Hedge / Ack' }),
     ],
   })
 }
@@ -338,12 +342,15 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
         ? `Liq ${nearestWatched.coin} ${nearestLiqStr}`
         : `TG Unread: ${model.state.health.telegram.unreadCount}`
 
+    const hasAlertBanner = !model.toast && Boolean(model.activeAlert)
     const metaContent = model.toast
       ? fitSingleLine(`★ ${model.toast}`, 552)
-      : fitSingleLine(
-          `DEMO Paper $${model.state.portfolio.equityUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} (${pnlSign}$${pnl.toFixed(1)}) · ${watchSummary} · TG:${model.state.health.telegram.unreadCount}`,
-          552,
-        )
+      : model.activeAlert
+        ? fitSingleLine(model.activeAlert.bannerText, 552)
+        : fitSingleLine(
+            `DEMO Paper $${model.state.portfolio.equityUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} (${pnlSign}$${pnl.toFixed(1)}) · ${watchSummary} · TG:${model.state.health.telegram.unreadCount}`,
+            552,
+          )
 
     const footContent = fitSingleLine(
       '↕ Swipe: Next   ● Tap: Act   ■ Hold: Voice   ≡ Menu',
@@ -414,7 +421,7 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
             borderRadius: 0,
             paddingLength: 4,
             content: clampBytes(metaContent),
-            textColor: model.toast ? 4 : 3,
+            textColor: model.toast || hasAlertBanner ? 4 : 3,
             isEventCapture: 0,
           },
           {
@@ -488,7 +495,7 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
           borderRadius: 0,
           paddingLength: 6,
           content: clampBytes(metaContent),
-          textColor: model.toast ? 4 : 3,
+          textColor: model.toast || hasAlertBanner ? 4 : 3,
           isEventCapture: 0,
         },
         {
@@ -731,12 +738,12 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
     const bodyLines = model.voiceActive
       ? [
           fitSingleLine(`LISTENING...   ${meter}   (${secs}s)`, 532),
-          fitSingleLine('Speak a short command, then release:', 532),
+          fitSingleLine('Zero-key local STT · Speak & release:', 532),
           fitSingleLine('· "Paper short 1000 BTC"  /  "Take 50% BTC"', 532),
           fitSingleLine('· "Move BTC stop to breakeven"  /  "Reply: hedging"', 532),
         ]
       : [
-          fitSingleLine('VOICE PIPELINE READY', 532),
+          fitSingleLine('VOICE PIPELINE READY · ZERO-KEY LOCAL STT', 532),
           ...wrapToLines(model.voiceStatusLine, 532, 3),
         ]
 
@@ -847,9 +854,12 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
     }
 
     const riskTiles = renderWalletRiskBarTiles(w)
+    const hasLiqAlert = !model.toast && model.activeAlert?.kind === 'liq_risk'
     const metaContent = model.toast
       ? fitSingleLine(`★ ${model.toast}`, 552)
-      : fitSingleLine(`${w.label} · ${w.positions.length} active perps · Sorted by Nearest Liq`, 552)
+      : hasLiqAlert && model.activeAlert
+        ? fitSingleLine(model.activeAlert.bannerText, 552)
+        : fitSingleLine(`${w.label} · ${w.positions.length} active perps · Sorted by Nearest Liq`, 552)
 
     const footContent = fitSingleLine(
       '● Tap: Hedge Nearest Liq   ↕ Swipe: Feed   ≡ Menu',
@@ -903,7 +913,7 @@ export function buildHudPage(model: HudRenderModel): BuiltHudPage {
           borderRadius: 0,
           paddingLength: 4,
           content: clampBytes(metaContent),
-          textColor: model.toast ? 4 : 3,
+          textColor: model.toast || hasLiqAlert ? 4 : 3,
           isEventCapture: 0,
         },
         {

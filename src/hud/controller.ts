@@ -11,8 +11,10 @@ import type {
   PulseStateSnapshot,
   SignalCard,
   StagedAction,
+  ThresholdAlert,
 } from '../../shared/types.js'
 import { executeStagedAction, sendVoiceCommand } from '../api/client.js'
+import { getTopThresholdAlert } from './alerts.js'
 import { GlassesAudioCapture } from './audio.js'
 import { normalizeEvenHubEvent, type NormalizedHudGesture } from './events.js'
 import {
@@ -68,6 +70,7 @@ export class PulseHudController {
   private voiceStatusLine = 'Hold temple or R1 ring to dictate a command.'
   private voiceTick = 0
   private voiceTimer: ReturnType<typeof setInterval> | null = null
+  private dismissedAlertIds = new Set<string>()
   private toast: string | null = null
   private toastTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -177,6 +180,36 @@ export class PulseHudController {
     return list[this.signalIndex]
   }
 
+  public getActiveThresholdAlert(): ThresholdAlert | null {
+    return getTopThresholdAlert(
+      this.state,
+      this.dismissedAlertIds,
+      this.getHlOrderSizeUsd(),
+      this.getPmStakeSizeUsd(),
+    )
+  }
+
+  public async stageActiveAlertHedge(): Promise<void> {
+    if (this.confirmPhase === 'committing') return
+    const alert = this.getActiveThresholdAlert()
+    if (!alert) {
+      this.showToast('No active threshold alerts')
+      return
+    }
+    this.openConfirmGate(alert.action)
+    await this.syncDisplay(false)
+  }
+
+  public async dismissActiveAlert(): Promise<void> {
+    const alert = this.getActiveThresholdAlert()
+    if (!alert) return
+    this.dismissedAlertIds.add(alert.id)
+    if (this.screen === 'actions') {
+      this.screen = 'feed'
+    }
+    this.showToast(`ACK · Dismissed ${alert.headline}`)
+  }
+
   public getRenderModel(): HudRenderModel {
     const armed = this.confirmPhase === 'armed' && this.confirmArmedUntil !== null
     const remainingMs = armed
@@ -207,6 +240,7 @@ export class PulseHudController {
       voiceDurationMs: this.voiceCapture.getDurationMs(),
       voiceLevel: this.voiceCapture.getLevel(),
       voiceTick: this.voiceTick,
+      activeAlert: this.getActiveThresholdAlert(),
       toast: this.toast,
     }
   }
@@ -347,6 +381,11 @@ export class PulseHudController {
             this.actions = this.buildActionsForSignal(active)
           }
           await this.syncDisplay(false)
+          return
+        }
+
+        if (chosen.uiCommand === 'ack_alert') {
+          await this.dismissActiveAlert()
           return
         }
 
@@ -568,6 +607,10 @@ export class PulseHudController {
         await this.syncDisplay(false)
         return
       }
+      case MENU_IDS.ALERT_ACTION: {
+        await this.stageActiveAlertHedge()
+        return
+      }
       default:
         return
     }
@@ -743,6 +786,25 @@ export class PulseHudController {
     }
   }
 
+  private appendProactiveAlertActions(list: StagedAction[]): StagedAction[] {
+    const alert = this.getActiveThresholdAlert()
+    if (!alert) return list
+    return [
+      ...list,
+      alert.action,
+      {
+        id: `act-ack-${alert.id}-${Date.now()}`,
+        type: alert.action.type,
+        label: `[ALERT] Ack / Dismiss (${alert.headline})`,
+        headline: 'ACK ALERT',
+        summary: '',
+        riskNote: '',
+        uiCommand: 'ack_alert',
+        source: 'tap',
+      },
+    ]
+  }
+
   private buildActionsForSignal(signal: SignalCard): StagedAction[] {
     const now = Date.now()
     if (signal.kind === 'hyperliquid') {
@@ -834,7 +896,7 @@ export class PulseHudController {
         source: 'tap',
       })
 
-      return list
+      return this.appendProactiveAlertActions(list)
     }
 
     if (signal.kind === 'polymarket') {
@@ -843,7 +905,7 @@ export class PulseHudController {
       const noCents = Math.round(signal.noPrice * 100)
       const callText = `[PulseHUD G2] Polymarket "${signal.shortTitle}" — YES ${Math.round(signal.yesPrice * 100)}c (${signal.change24hCents >= 0 ? '+' : ''}${signal.change24hCents}c 24h)`
 
-      return [
+      return this.appendProactiveAlertActions([
         {
           id: `act-yes-${now}`,
           type: 'pm_paper_yes',
@@ -891,7 +953,7 @@ export class PulseHudController {
           telegramText: callText,
           source: 'tap',
         },
-      ]
+      ])
     }
 
     // Telegram Desk smart drafts + Coin-Locked TG->Trade jump & direct hedge!
@@ -943,7 +1005,7 @@ export class PulseHudController {
       }
     }
 
-    return tgActions
+    return this.appendProactiveAlertActions(tgActions)
   }
 
   private async pushImages(page: BuiltHudPage, forceAll: boolean): Promise<void> {

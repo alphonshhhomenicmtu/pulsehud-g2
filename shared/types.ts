@@ -134,8 +134,28 @@ export interface StagedAction {
   telegramChatId?: string
   telegramText?: string
   /** Optional non-destructive HUD action executed immediately without opening Confirm Gate. */
-  uiCommand?: 'cycle_hl_size' | 'cycle_pm_size' | 'jump_coin_trade'
+  uiCommand?: 'cycle_hl_size' | 'cycle_pm_size' | 'jump_coin_trade' | 'ack_alert'
   source: 'tap' | 'voice' | 'menu'
+}
+
+export type SttProvider =
+  | 'openai_whisper'
+  | 'deepgram'
+  | 'local_whisper'
+  | 'local_http'
+  | 'local_command'
+
+export type ThresholdAlertKind = 'liq_risk' | 'funding_extreme' | 'odds_swing'
+
+export interface ThresholdAlert {
+  id: string
+  kind: ThresholdAlertKind
+  severity: 'critical' | 'warn'
+  headline: string
+  bannerText: string
+  coin?: string
+  marketId?: string
+  action: StagedAction
 }
 
 export interface PaperPosition {
@@ -198,7 +218,7 @@ export interface FeedHealth {
     error?: string
   }
   stt: {
-    provider: 'openai_whisper' | 'deepgram' | 'local_command'
+    provider: SttProvider
   }
 }
 
@@ -216,7 +236,7 @@ export interface PulseStateSnapshot {
 export interface VoiceCommandResponse {
   ok: boolean
   transcript: string
-  provider: 'openai_whisper' | 'deepgram' | 'local_command'
+  provider: SttProvider
   audioBytes?: number
   durationMs?: number
   stagedAction: StagedAction | null
